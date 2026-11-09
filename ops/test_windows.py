@@ -50,6 +50,20 @@ class RunAgentTest(TempState):
         self.assertEqual(env["PYTHONUTF8"], "1")
         self.assertTrue(env["PATH"].startswith(str(Path(sys.executable).parent)))  # Agent 的 python 就是这个
 
+    def test_only_current_engine_keys(self):
+        """B、C 的钥匙同时填着，切换时每个底座只拿到自己的。"""
+        conf = ("ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic\nANTHROPIC_AUTH_TOKEN=sk-ds\n"
+                "CODEBUDDY_API_KEY=cb-key\nCODEBUDDY_INTERNET_ENVIRONMENT=internal\n")
+        (self.state / "agent.env").write_text("AGENT_ENGINE=claude\n" + conf, encoding="utf-8")
+        engine, env = run_agent.build_env()
+        self.assertEqual((engine, env["ANTHROPIC_AUTH_TOKEN"]), ("claude", "sk-ds"))
+        self.assertNotIn("CODEBUDDY_API_KEY", env)
+        (self.state / "agent.env").write_text("AGENT_ENGINE=codebuddy\n" + conf, encoding="utf-8")
+        engine, env = run_agent.build_env()
+        self.assertEqual((engine, env["CODEBUDDY_API_KEY"]), ("codebuddy", "cb-key"))
+        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
+        self.assertNotIn("ANTHROPIC_BASE_URL", env)
+
     def test_default_engine_and_bad_engine(self):
         engine, _ = run_agent.build_env()          # 没有 agent.env 也能跑，默认 claude
         self.assertEqual(engine, "claude")

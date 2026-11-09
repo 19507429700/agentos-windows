@@ -23,9 +23,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agentos_env import IS_WIN, NO_WINDOW, REPO, STATE, child_env, proxy, read_env  # noqa: E402
 
-AGENT_KEYS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
-              "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-              "CODEBUDDY_API_KEY", "CODEBUDDY_INTERNET_ENVIRONMENT", "CLAUDE_CODE_GIT_BASH_PATH")
+# 每个底座只拿到自己用得到的钥匙：两种底座的钥匙可以同时填在 agent.env 里，切换时只改 AGENT_ENGINE，
+# 不会把 DeepSeek 的地址、密钥交给 CodeBuddy，反过来也一样
+ENGINE_KEYS = {
+    "claude": ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
+               "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_GIT_BASH_PATH"),
+    "codebuddy": ("CODEBUDDY_API_KEY", "CODEBUDDY_INTERNET_ENVIRONMENT"),
+}
+AGENT_KEYS = tuple(k for keys in ENGINE_KEYS.values() for k in keys)
 SID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
 
 
@@ -87,7 +92,7 @@ def build_env() -> tuple[str, dict[str, str]]:
     for k in AGENT_KEYS:          # 先清掉外面带进来的，只认 agent.env 里填了值的
         env.pop(k, None)
     for k, v in conf.items():
-        if k in AGENT_KEYS and v:
+        if k in ENGINE_KEYS.get(engine, ()) and v:
             env[k] = v
     px = proxy()
     if px:

@@ -116,6 +116,9 @@ def build_env() -> tuple[str, dict[str, str]]:
         appdata = os.environ.get("APPDATA", "")
         if appdata:
             extra.append(str(Path(appdata) / "npm"))   # npm 装的 claude / codebuddy 在这里
+        localappdata = os.environ.get("LOCALAPPDATA", "")
+        if localappdata:   # CodeBuddy 官方安装脚本装在这里；PATH 没刷新时（比如机器人在安装前就启动了）也能找到
+            extra.append(str(Path(localappdata) / "codebuddy" / "bin"))
         if "CLAUDE_CODE_GIT_BASH_PATH" not in env:   # Claude Code 在 Windows 上要用 Git 自带的 bash 跑命令
             bash = find_git_bash(env.get("PATH", ""))
             if bash:

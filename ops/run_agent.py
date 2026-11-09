@@ -27,7 +27,9 @@ from agentos_env import IS_WIN, NO_WINDOW, REPO, STATE, child_env, proxy, read_e
 # 不会把 DeepSeek 的地址、密钥交给 CodeBuddy，反过来也一样
 ENGINE_KEYS = {
     "claude": ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
-               "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_GIT_BASH_PATH"),
+               "ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+               "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL",
+               "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_GIT_BASH_PATH"),
     "codebuddy": ("CODEBUDDY_API_KEY", "CODEBUDDY_INTERNET_ENVIRONMENT"),
 }
 AGENT_KEYS = tuple(k for keys in ENGINE_KEYS.values() for k in keys)
@@ -94,6 +96,15 @@ def build_env() -> tuple[str, dict[str, str]]:
     for k, v in conf.items():
         if k in ENGINE_KEYS.get(engine, ()) and v:
             env[k] = v
+    if engine == "claude" and env.get("ANTHROPIC_BASE_URL") and env.get("ANTHROPIC_MODEL"):
+        # 接其他公司的接口时，Claude Code 后台的小杂事、派出去的子助手默认用 Claude 的型号名，
+        # 对方会按自己的规则转（DeepSeek 会把 opus 转到更贵的 v4-pro）。没单独设的，都用你填的那个模型。
+        # 型号名末尾的 [1m] 是告诉 Claude Code「上下文有 100 万」，小杂事和子助手用不带它的名字（照 DeepSeek 文档）
+        main = env["ANTHROPIC_MODEL"]
+        plain = re.sub(r"\[[^\]]*\]$", "", main)
+        for k, v in (("ANTHROPIC_DEFAULT_OPUS_MODEL", main), ("ANTHROPIC_DEFAULT_SONNET_MODEL", main),
+                     ("ANTHROPIC_DEFAULT_HAIKU_MODEL", plain), ("CLAUDE_CODE_SUBAGENT_MODEL", plain)):
+            env.setdefault(k, v)
     px = proxy()
     if px:
         env.setdefault("HTTPS_PROXY", px)

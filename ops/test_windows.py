@@ -64,6 +64,21 @@ class RunAgentTest(TempState):
         self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
         self.assertNotIn("ANTHROPIC_BASE_URL", env)
 
+    def test_deepseek_fills_default_models(self):
+        """接 DeepSeek 只填了 ANTHROPIC_MODEL：其余几个型号自动设成同一个，免得被转到更贵的模型。"""
+        (self.state / "agent.env").write_text(
+            "ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic\nANTHROPIC_AUTH_TOKEN=sk\n"
+            "ANTHROPIC_MODEL=deepseek-flash[1m]\n", encoding="utf-8")
+        _, env = run_agent.build_env()
+        self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "deepseek-flash[1m]")
+        self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "deepseek-flash[1m]")
+        self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "deepseek-flash")
+        self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "deepseek-flash")
+        # Claude 订阅（没有 ANTHROPIC_BASE_URL）时不动这些
+        (self.state / "agent.env").write_text("CLAUDE_CODE_OAUTH_TOKEN=x\n", encoding="utf-8")
+        _, env = run_agent.build_env()
+        self.assertNotIn("ANTHROPIC_DEFAULT_OPUS_MODEL", env)
+
     def test_default_engine_and_bad_engine(self):
         engine, _ = run_agent.build_env()          # 没有 agent.env 也能跑，默认 claude
         self.assertEqual(engine, "claude")

@@ -264,8 +264,10 @@ py ops\set_key.py agent ANTHROPIC_BASE_URL https://api.deepseek.com/anthropic
 ```
 
 ```powershell
-py ops\set_key.py agent ANTHROPIC_MODEL 这里写文档里的模型名
+py ops\set_key.py agent ANTHROPIC_MODEL 'deepseek-flash[1m]'
 ```
+
+（DeepSeek 推荐用 `deepseek-flash`：便宜，而且能看图片。`[1m]` 是告诉 Claude Code「上下文有 100 万字」，照 DeepSeek 文档写；**两边的单引号要带上**，不然 PowerShell 会把方括号当成别的意思。用别家的接口，就换成那家文档写的模型名。）
 
 ```powershell
 py ops\set_key.py agent ANTHROPIC_AUTH_TOKEN

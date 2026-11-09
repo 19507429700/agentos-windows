@@ -400,5 +400,47 @@ class HelpersTest(unittest.TestCase):
             os.unlink(f.name)
 
 
+class NetRetryTest(unittest.TestCase):
+    """连飞书时网络断开（Windows 上常见 10054）：自动重试，不让写好的回答丢掉。"""
+
+    def setUp(self):
+        self._waits = bridge.NET_RETRY_WAITS
+        bridge.NET_RETRY_WAITS = (0, 0)
+
+    def tearDown(self):
+        bridge.NET_RETRY_WAITS = self._waits
+
+    def test_retry_then_ok(self):
+        calls = []
+
+        def flaky():
+            calls.append(1)
+            if len(calls) < 3:
+                raise ConnectionResetError(10054, "远程主机强迫关闭了一个现有的连接。")
+            return "ok"
+        self.assertEqual(bridge.with_retry(flaky, "send"), "ok")
+        self.assertEqual(len(calls), 3)
+
+    def test_give_up_after_three(self):
+        calls = []
+
+        def down():
+            calls.append(1)
+            raise ConnectionResetError(10054, "reset")
+        with self.assertRaises(ConnectionResetError):
+            bridge.with_retry(down, "send")
+        self.assertEqual(len(calls), 3)
+
+    def test_other_errors_not_retried(self):
+        calls = []
+
+        def bug():
+            calls.append(1)
+            raise ValueError("不是网络问题")
+        with self.assertRaises(ValueError):
+            bridge.with_retry(bug, "send")
+        self.assertEqual(len(calls), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -349,6 +349,22 @@ def _drive(cfg: Config, proc: subprocess.Popen, prompt: str, on_stuck) -> AgentR
 
 # ---------- 飞书 ----------
 
+NET_RETRY_WAITS = (2, 5)  # 网络断了（10054 之类）等几秒再试；三次都失败才报错
+
+
+def with_retry(call, what: str):
+    """调飞书接口，遇到网络错误（连接被重置、超时……）自动重试，免得 Agent 已经写好的回答发不出去就丢了。
+    requests 的网络异常都是 OSError 的子类；飞书返回的业务错误（权限不够等）不在这里重试。"""
+    for wait in NET_RETRY_WAITS + (None,):
+        try:
+            return call()
+        except OSError as e:
+            if wait is None:
+                raise
+            log.warning("feishu %s 网络出错，%s 秒后重试：%r", what, wait, e)
+            time.sleep(wait)
+
+
 class Feishu:
     def __init__(self, cfg: Config):
         import lark_oapi as lark
@@ -361,14 +377,14 @@ class Feishu:
         req = ReplyMessageRequest.builder().message_id(message_id).request_body(
             ReplyMessageRequestBody.builder().msg_type("text")
             .content(json.dumps({"text": text}, ensure_ascii=False)).build()).build()
-        self._check(self.client.im.v1.message.reply(req), "reply")
+        self._check(with_retry(lambda: self.client.im.v1.message.reply(req), "reply"), "reply")
 
     def send(self, chat_id: str, msg_type: str, content: str) -> bool:
         from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
         req = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(
             CreateMessageRequestBody.builder().receive_id(chat_id).msg_type(msg_type)
             .content(content).build()).build()
-        return self._check(self.client.im.v1.message.create(req), "send")
+        return self._check(with_retry(lambda: self.client.im.v1.message.create(req), "send"), "send")
 
     def send_text(self, chat_id: str, text: str) -> None:
         self.send(chat_id, "text", json.dumps({"text": text}, ensure_ascii=False))
@@ -379,7 +395,7 @@ class Feishu:
         req = CreateMessageRequest.builder().receive_id_type("open_id").request_body(
             CreateMessageRequestBody.builder().receive_id(open_id).msg_type(msg_type)
             .content(content).build()).build()
-        return self._check(self.client.im.v1.message.create(req), "send to user")
+        return self._check(with_retry(lambda: self.client.im.v1.message.create(req), "send to user"), "send to user")
 
     def send_markdown(self, chat_id: str, md: str) -> None:
         """Claude 的回复是 Markdown，用卡片渲染；太长就分几张，卡片失败退回纯文本。"""
@@ -392,7 +408,7 @@ class Feishu:
         """下载用户发来的消息附件，返回 (内容, 文件名)。"""
         from lark_oapi.api.im.v1 import GetMessageResourceRequest
         req = GetMessageResourceRequest.builder().message_id(message_id).file_key(key).type(rtype).build()
-        resp = self.client.im.v1.message_resource.get(req)
+        resp = with_retry(lambda: self.client.im.v1.message_resource.get(req), "download")
         if not self._check(resp, "download"):
             raise RuntimeError(f"下载附件失败：{resp.code} {resp.msg}")
         return resp.file.read(), resp.file_name or ""
@@ -401,18 +417,24 @@ class Feishu:
         """上传本地文件并作为文件消息发出；图片作为图片消息。"""
         from lark_oapi.api.im.v1 import (CreateFileRequest, CreateFileRequestBody,
                                          CreateImageRequest, CreateImageRequestBody)
-        with open(path, "rb") as f:
-            if path.suffix.lower() in IMAGE_EXTS:
-                req = CreateImageRequest.builder().request_body(
-                    CreateImageRequestBody.builder().image_type("message").image(f).build()).build()
-                resp = self.client.im.v1.image.create(req)
-                if not self._check(resp, "upload image"):
-                    return False
-                return self.send(chat_id, "image", json.dumps({"image_key": resp.data.image_key}))
-            req = CreateFileRequest.builder().request_body(
-                CreateFileRequestBody.builder().file_type(FILE_TYPES.get(path.suffix.lower(), "stream"))
-                .file_name(path.name).file(f).build()).build()
-            resp = self.client.im.v1.file.create(req)
+        if path.suffix.lower() in IMAGE_EXTS:
+            def upload_image():
+                with open(path, "rb") as f:  # 每次重试都重新打开，上一次可能已经读到文件末尾
+                    req = CreateImageRequest.builder().request_body(
+                        CreateImageRequestBody.builder().image_type("message").image(f).build()).build()
+                    return self.client.im.v1.image.create(req)
+            resp = with_retry(upload_image, "upload image")
+            if not self._check(resp, "upload image"):
+                return False
+            return self.send(chat_id, "image", json.dumps({"image_key": resp.data.image_key}))
+
+        def upload_file():
+            with open(path, "rb") as f:
+                req = CreateFileRequest.builder().request_body(
+                    CreateFileRequestBody.builder().file_type(FILE_TYPES.get(path.suffix.lower(), "stream"))
+                    .file_name(path.name).file(f).build()).build()
+                return self.client.im.v1.file.create(req)
+        resp = with_retry(upload_file, "upload file")
         if not self._check(resp, "upload file"):
             return False
         return self.send(chat_id, "file", json.dumps({"file_key": resp.data.file_key}))

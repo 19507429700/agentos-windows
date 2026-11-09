@@ -68,7 +68,7 @@ def find_git_bash(path: str = "") -> str | None:
       3. 注册表里 Git 官方安装包登记的安装目录
       4. 默认安装位置 C:\\Program Files\\Git"""
     roots: list[Path] = []
-    git = shutil.which("git", path=path or None)
+    git = find_exe("git", {"PATH": path or os.environ.get("PATH", "")})
     if git:
         roots += _up(Path(git).resolve().parent, 3)
         try:
@@ -152,8 +152,20 @@ def trust_project() -> None:
     os.replace(tmp, p)
 
 
-def find_exe(name: str, env: dict[str, str]) -> str | None:
-    return shutil.which(name, path=env["PATH"])
+def find_exe(name: str, env: dict[str, str], is_win: bool = IS_WIN) -> str | None:
+    """找 Agent 程序。Windows 上 npm 会在同一个文件夹放 claude（给 bash 用的脚本，Windows 运行不了）、
+    claude.cmd、claude.ps1 三个；有的 Python 版本（如 3.12.0）的 shutil.which 会先找到没有后缀的那个，
+    运行时报「%1 不是有效的 Win32 应用程序」。所以 Windows 上只认 .exe、.cmd、.bat，按 PATH 顺序找。"""
+    if not is_win:
+        return shutil.which(name, path=env["PATH"])
+    for d in env["PATH"].split(os.pathsep):
+        if not d:
+            continue
+        for ext in (".exe", ".cmd", ".bat"):
+            c = Path(d) / (name + ext)
+            if c.is_file():
+                return str(c)
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:

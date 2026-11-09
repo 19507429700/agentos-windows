@@ -79,6 +79,21 @@ class RunAgentTest(TempState):
         _, env = run_agent.build_env()
         self.assertNotIn("ANTHROPIC_DEFAULT_OPUS_MODEL", env)
 
+    def test_find_exe_skips_bash_script_on_windows(self):
+        """npm 装的 claude：同一个文件夹有 claude（bash 脚本）、claude.cmd、claude.ps1，Windows 上要用 .cmd。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            npm = Path(tmp) / "npm"
+            npm.mkdir()
+            for f in ("claude", "claude.cmd", "claude.ps1"):
+                (npm / f).write_text("", encoding="utf-8")
+            empty = Path(tmp) / "empty"
+            empty.mkdir()
+            env = {"PATH": os.pathsep.join([str(empty), str(npm)])}
+            self.assertEqual(run_agent.find_exe("claude", env, is_win=True), str(npm / "claude.cmd"))
+            (empty / "claude.exe").write_text("", encoding="utf-8")   # 官方安装包的 claude.exe 在前面就用它
+            self.assertEqual(run_agent.find_exe("claude", env, is_win=True), str(empty / "claude.exe"))
+            self.assertIsNone(run_agent.find_exe("codebuddy", env, is_win=True))
+
     def test_default_engine_and_bad_engine(self):
         engine, _ = run_agent.build_env()          # 没有 agent.env 也能跑，默认 claude
         self.assertEqual(engine, "claude")

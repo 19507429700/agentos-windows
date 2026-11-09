@@ -322,7 +322,7 @@ py ops\check_agent.py
 
 飞书开放平台 → 创建「企业自建应用」：
 - 添加「**机器人**」能力；
-- 权限管理里开（**应用身份**）：`im:message.p2p_msg:readonly`、`im:message:send_as_bot`、`im:resource`；
+- 权限管理里开（**应用身份**）：`im:message.p2p_msg:readonly`、`im:message:send_as_bot`、`im:resource`、`im:message:readonly`（最后这个用来下载你发给机器人的图片和文件，漏了会报「下载附件失败：99991672 Access denied」）；
 - 记下「凭证与基础信息」里的 **App ID** 和 **App Secret**。
 
 > **如果你的 Mac 上也在跑 AgentOS**：这里要**另建一个新应用**（比如叫 agentos-win），不要和 Mac 共用一个机器人。两台电脑连着同一个机器人，飞书会把消息随机交给其中一台。

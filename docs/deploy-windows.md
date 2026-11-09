@@ -86,35 +86,52 @@ sudo timedatectl set-timezone Asia/Shanghai
 
 ## 第二步：拿代码，换成你自己的备份仓库
 
-代码**必须放在 `~/AgentOS`**，安装脚本按这个位置找。
+一共涉及两个 GitHub 仓库：
+- **模板仓库** `agentos-windows`：只有代码，用来拿代码、以后拉更新。在这台电脑上叫 `upstream`（更新来源）。
+- **你自己的仓库**（比如 `my-agentos-windows`，私有，建的时候什么都不勾）：每天 03:00 备份你的知识库。在这台电脑上叫 `origin`（备份去向）。
 
-```bash
-git clone https://github.com/<放 Windows 版代码的账号>/agentos-windows.git ~/AgentOS
-```
-
-（会问用户名和密码时：用户名填 GitHub 用户名，密码填**个人访问令牌**。）
-
-让 Git 记住令牌，以后每天备份推送时不用再输：
+先让 Git 记住令牌（下一步第一次输入后就记住了，以后备份推送不用再输）：
 
 ```bash
 git config --global credential.helper store
 ```
 
-把备份地址换成**你自己的私有仓库**。这一步一定要做，不然每天 03:00 的知识库备份会推到放代码的那个仓库：
+```bash
+git config --global user.name "你的名字" && git config --global user.email "you@example.com"
+```
+
+拿代码。代码**必须放在 `~/AgentOS`**，安装脚本按这个位置找：
 
 ```bash
-git -C ~/AgentOS remote set-url origin https://github.com/<你的账号>/my-agentos.git
+git clone https://github.com/<账号>/agentos-windows.git ~/AgentOS
+```
+
+（会问用户名和密码时：用户名填 GitHub 用户名，密码填**个人访问令牌**。）
+
+把模板改名为 `upstream`，再把你自己的仓库设成 `origin`。这一步一定要做，不然每天 03:00 的知识库备份会推到模板仓库里：
+
+```bash
+git -C ~/AgentOS remote rename origin upstream
+```
+
+```bash
+git -C ~/AgentOS remote add origin https://github.com/<账号>/my-agentos-windows.git
 ```
 
 ```bash
 git -C ~/AgentOS push -u origin main
 ```
 
-再设一下提交时用的名字（随便填）：
+检查一下，应该看到 `origin` 指向你自己的仓库、`upstream` 指向模板：
 
 ```bash
-git config --global user.name "你的名字" && git config --global user.email "you@example.com"
+git -C ~/AgentOS remote -v
 ```
+
+> 以后模板有更新，在这台电脑上拉下来、同步到运行副本：
+> `git -C ~/AgentOS pull upstream main && ~/AgentOS/ops/deploy.sh`
+
+**如果你的 Mac 上也在跑 AgentOS**（比如你自己在 Windows 上测试）：第六步要**另建一个飞书应用**（比如叫 agentos-win）给 Windows 用，不要和 Mac 共用同一个机器人。两台电脑连着同一个机器人时，飞书会把你的消息随机交给其中一台，另一台就收不到了；以本人身份读飞书的授权也最好分开，免得互相顶掉。邮箱可以两边都读，互不影响。
 
 ---
 

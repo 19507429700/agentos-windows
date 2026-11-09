@@ -187,11 +187,15 @@ if (Has-Value $bridgeEnv "OWNER_OPEN_ID") {
     Install-Job "daily-review" 40 (New-ScheduledTaskTrigger -Daily -At "23:00") @($py, "`"$ops\daily_review.py`"")
 } else { Say "    跳过每日复盘：bridge.env 里还没填 OWNER_OPEN_ID（先绑定本人）" }
 
-$origin = $null
-try { $origin = (& git -C $Repo remote get-url origin 2>$null) } catch { Say "    ⚠️ 没找到 git：winget install Git.Git" }
-if ($origin) {
+# 知识库备份：origin 设成你自己的仓库才装；origin 还是模板仓库时绝不装（免得把知识库推进模板）
+$why = $null
+try { $why = (& $Py -X utf8 (Join-Path $ops "push_kb.py") --check 2>&1) } catch { $why = $_.Exception.Message }
+if ($LASTEXITCODE -eq 0) {
     Install-Job "push-kb" 15 (New-ScheduledTaskTrigger -Daily -At "03:00") @($py, "`"$ops\push_kb.py`"")
-} else { Say "    跳过知识库备份：还没设置 origin（你自己的备份仓库）" }
+} else {
+    Unregister-ScheduledTask -TaskName "AgentOS-push-kb" -Confirm:$false -ErrorAction SilentlyContinue
+    Say "    跳过知识库备份：$why"
+}
 
 # ---------- 底座 ----------
 $engine = ((Get-Content (Join-Path $State "agent.env") -Encoding UTF8 | Where-Object { $_ -match "^\s*AGENT_ENGINE\s*=" }) -replace "^\s*AGENT_ENGINE\s*=\s*", "").Trim()

@@ -27,6 +27,24 @@ RAW = SPACE / "raw"
 LOGS = STATE / "logs"
 # 子进程不弹黑窗口（定时任务和飞书机器人都在后台跑）
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if IS_WIN else 0
+# 模板仓库（只放代码、给别人用的，写成「账号/仓库名」）。知识库绝不能推到这里：
+# 刚 git clone 下来时 origin 就是它，忘了换成自己的备份仓库，每天的备份就会把画像、复盘推进模板。
+# 以后模板换了地址，改这一行。
+TEMPLATE_REPOS = ("19507429700/agentos-windows",)
+
+
+def repo_slug(url: str) -> str:
+    """把仓库地址归一成「账号/仓库名」（小写）：https://github.com/a/b.git、git@github.com:a/b 都变成 a/b。"""
+    u = (url or "").strip().lower().rstrip("/")
+    if u.endswith(".git"):
+        u = u[:-4]
+    u = u.replace(":", "/")
+    parts = [p for p in u.split("/") if p]
+    return "/".join(parts[-2:]) if len(parts) >= 2 else u
+
+
+def is_template(url: str) -> bool:
+    return repo_slug(url) in {t.lower() for t in TEMPLATE_REPOS}
 
 
 def read_env(path: Path) -> dict[str, str]:

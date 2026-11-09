@@ -145,5 +145,38 @@ class SetKeyTest(TempState):
         self.assertEqual(set_key.main(["agent", "bad name", "v"]), 2)
 
 
+class PushKbGuardTest(unittest.TestCase):
+    """origin 还是模板仓库时，绝不能把知识库推进去。"""
+
+    def test_is_template(self):
+        for url in ("https://github.com/19507429700/agentos-windows.git", "https://github.com/19507429700/agentos-windows",
+                    "https://github.com/19507429700/Agentos-Windows/", "git@github.com:19507429700/agentos-windows.git"):
+            self.assertTrue(agentos_env.is_template(url), url)
+        for url in ("https://github.com/19507429700/my-agentos-windows.git", "https://github.com/someone/agentos-windows",
+                    "https://github.com/19507429700/agentos.git", ""):
+            self.assertFalse(agentos_env.is_template(url), url)
+
+    def test_check_origin(self):
+        import subprocess
+        import push_kb
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            old = push_kb.REPO
+            push_kb.REPO = Path(tmp)
+            try:
+                self.assertIn("没有设置备份仓库", push_kb.origin_problem())
+                subprocess.run(["git", "-C", tmp, "remote", "add", "origin",
+                                "https://github.com/19507429700/agentos-windows.git"], check=True)
+                self.assertIn("还是模板仓库", push_kb.origin_problem())
+                self.assertEqual(push_kb.main(["--check"]), 1)
+                self.assertEqual(push_kb.main([]), 1)          # 真备份也拒绝，什么都不提交
+                subprocess.run(["git", "-C", tmp, "remote", "set-url", "origin",
+                                "https://github.com/19507429700/my-agentos-windows.git"], check=True)
+                self.assertEqual(push_kb.origin_problem(), "")
+                self.assertEqual(push_kb.main(["--check"]), 0)
+            finally:
+                push_kb.REPO = old
+
+
 if __name__ == "__main__":
     unittest.main()

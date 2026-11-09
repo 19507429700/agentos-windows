@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """邮箱采集：IMAP 只读增量拉取，过滤广告和系统通知，存成 Markdown 原文。
 
 以你自己的账号运行（不是 agentos）：邮箱授权码通常也能发信，所以只放在你这边，Agent 拿不到。

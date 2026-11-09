@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """以你本人身份授权飞书（一次性）。以你自己的账号运行：
 
   python3 ops/feishu_auth.py

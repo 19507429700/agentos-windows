@@ -71,6 +71,12 @@ Test-Path "C:\Program Files\LibreOffice\program\soffice.exe"
 [Environment]::SetEnvironmentVariable("PY_PYTHON", "3.12", "User")
 ```
 
+```powershell
+[Environment]::SetEnvironmentVariable("PY_PYTHON3", "3.12", "User")
+```
+
+（两条都要设：第二条管的是 `py` 遇到「python3」时用哪个版本。）
+
 缺哪个装哪个。一条一条运行，每条装完再下一条（可能弹窗问「是否允许更改」，点「是」；LibreOffice 比较大，要下载几分钟）：
 
 ```powershell

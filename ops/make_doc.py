@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """文档转换（Agent 用）：Markdown / HTML / Word 之间互转，以及转 PDF。底层是 LibreOffice。
 
   python ops/make_doc.py 输入.md   输出.docx      # Markdown → Word

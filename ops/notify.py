@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """给你本人推一条通知：飞书（agentos 机器人私聊）+ 微信（PushPlus）。复盘和告警都走这里。
 
 以你自己的账号运行（凭据在 ~/.agentos/bridge.env，agentos 读不到）：

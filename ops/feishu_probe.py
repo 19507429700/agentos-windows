@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """实测：以你本人身份能读到哪些飞书会话、能往回读多久（D2 第 1 步）。以你自己的账号运行：
 
   python3 ops/feishu_probe.py

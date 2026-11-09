@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """把原文里图片、PDF、Word、PPT 中的文字提取出来，存成旁边的同名 .txt，让 search.py 也能搜到。
 
 为什么要它：search.py 只索引文字文件（.md、.txt…），图片里的字、PDF 和 Word 的正文原来都搜不到。

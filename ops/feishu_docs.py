@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """飞书云文档读取（以你本人身份，只读），供 collect_feishu.py 调用：
   - 文档（docx）：按「块」转成 Markdown，标题、列表、代码、表格都保留；图片下载成文件，在原位置写 ![图N](路径)
   - 电子表格（sheet）：每个工作表转成 Markdown 表格

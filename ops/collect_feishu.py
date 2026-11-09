@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """飞书消息采集：以你本人身份增量拉取群聊（和私聊）消息，存成 Markdown 原文。
 
 以你自己的账号运行（授权凭证在 ~/.agentos/，agentos 读不到）：

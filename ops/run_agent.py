@@ -29,18 +29,52 @@ AGENT_KEYS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_T
 SID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
 
 
+def _git_roots_from_registry() -> list[Path]:
+    """Git 官方安装包在注册表里登记的安装目录（HKLM / HKCU 的 SOFTWARE\\GitForWindows\\InstallPath）。"""
+    try:
+        import winreg
+    except ImportError:  # 不是 Windows
+        return []
+    roots = []
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            with winreg.OpenKey(hive, r"SOFTWARE\GitForWindows") as k:
+                roots.append(Path(winreg.QueryValueEx(k, "InstallPath")[0]))
+        except OSError:
+            pass
+    return roots
+
+
+def _up(p: Path, levels: int) -> list[Path]:
+    out = []
+    for _ in range(levels):
+        out.append(p)
+        p = p.parent
+    return out
+
+
 def find_git_bash(path: str = "") -> str | None:
-    """找 Git 自带的 bash.exe。Git 不一定装在 C:\\Program Files\\Git（比如装在 E 盘），
-    所以先顺着 git 命令的位置找：<Git 目录>\\cmd\\git.exe → <Git 目录>\\bin\\bash.exe。"""
-    candidates = []
+    """找 Git 自带的 bash.exe（Claude Code 在 Windows 上用它跑命令）。Git 不一定装在 C:\\Program Files\\Git，
+    按下面的顺序找，找到第一个存在的 <Git 目录>\\bin\\bash.exe：
+      1. 顺着 git 命令的位置：<Git 目录>\\cmd\\git.exe（也可能在 bin\\、mingw64\\bin\\ 下）
+      2. 问 Git 自己：git --exec-path 给出 <Git 目录>\\mingw64\\libexec\\git-core（Scoop 这类「转接」的 git 也能问出真实位置）
+      3. 注册表里 Git 官方安装包登记的安装目录
+      4. 默认安装位置 C:\\Program Files\\Git"""
+    roots: list[Path] = []
     git = shutil.which("git", path=path or None)
     if git:
-        root = Path(git).resolve().parent
-        for _ in range(3):  # git.exe 可能在 cmd\、bin\、mingw64\bin\ 下，往上找几层
-            candidates.append(root / "bin" / "bash.exe")
-            root = root.parent
-    candidates += [Path(r"C:\Program Files\Git\bin\bash.exe"), Path(r"C:\Program Files (x86)\Git\bin\bash.exe")]
-    for c in candidates:
+        roots += _up(Path(git).resolve().parent, 3)
+        try:
+            r = subprocess.run([git, "--exec-path"], capture_output=True, text=True, timeout=10,
+                               creationflags=NO_WINDOW)
+            if r.returncode == 0 and r.stdout.strip():
+                roots += _up(Path(r.stdout.strip()), 5)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    roots += _git_roots_from_registry()
+    roots += [Path(r"C:\Program Files\Git"), Path(r"C:\Program Files (x86)\Git")]
+    for root in roots:
+        c = root / "bin" / "bash.exe"
         if c.is_file():
             return str(c)
     return None

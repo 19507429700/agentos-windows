@@ -192,6 +192,20 @@ class GitBashTest(unittest.TestCase):
             self.assertEqual(run_agent.find_git_bash(str(root / "cmd")), str((root / "bin" / "bash.exe").resolve()))
             self.assertIsNone(run_agent.find_git_bash(str(Path(tmp) / "没有git")))
 
+    def test_find_bash_through_shim(self):
+        """Scoop 这类「转接」的 git：命令所在的文件夹里没有 bash，要靠 git --exec-path 问出真实的 Git 目录。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp) / "scoop" / "apps" / "git" / "current"
+            (real / "bin").mkdir(parents=True)
+            (real / "mingw64" / "libexec" / "git-core").mkdir(parents=True)
+            (real / "bin" / "bash.exe").write_text("", encoding="utf-8")
+            shims = Path(tmp) / "scoop" / "shims"
+            shims.mkdir(parents=True)
+            git = shims / "git"
+            git.write_text(f"#!/bin/sh\necho '{real / 'mingw64' / 'libexec' / 'git-core'}'\n", encoding="utf-8")
+            git.chmod(0o755)
+            self.assertEqual(run_agent.find_git_bash(str(shims)), str(real / "bin" / "bash.exe"))
+
 
 if __name__ == "__main__":
     unittest.main()

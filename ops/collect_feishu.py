@@ -238,9 +238,9 @@ def main(argv: list[str] | None = None) -> int:
 
 DOC_LINK_RE = re.compile(r"https?://[\w.-]*(?:feishu\.cn|larksuite\.com)/(wiki|docx|sheets|base)/([A-Za-z0-9]{20,})")
 LINK_KIND = {"wiki": "wiki", "docx": "docx", "sheets": "sheet", "base": "bitable"}
-DOC_RECHECK_SEC = 3600       # 已存过的每小时看一次有没有新版本
+DOC_RECHECK_SEC = 600        # 已存过的每 10 分钟看一次有没有新版本（每份调一次接口）
 DOC_FAIL_RETRY_SEC = 86400   # 读不了的（没权限、类型不支持）一天后再试
-DOC_LIST_EVERY_SEC = 3600    # 每小时列一次我的云盘和文档库
+DOC_LIST_EVERY_SEC = 600     # 每 10 分钟列一次我的云盘和文档库（和聊天采集一样快）
 DOC_TIME_BUDGET_SEC = 240    # 每轮最多花 4 分钟读文档，剩下的下一轮接着读（整个采集任务 8 分钟超时）
 DOC_FMT = 2                  # 存法的版本：2 = 按块读、表格保留、图片下载。旧版存的会按新存法重读一次
 SAVED_PREFIXES = ("文档-", "妙记-", "表格-", "多维表格-")
@@ -274,7 +274,7 @@ def find_doc_links(raw_dir: Path) -> dict[str, str]:
 
 
 def refresh_my_docs(st: dict, http=fu.http_json, now: float | None = None) -> str:
-    """每小时列一次「我的云盘」「我的文档库」，结果存在 st["my_docs"]。返回出错说明（没有就是空串）。"""
+    """每 10 分钟列一次「我的云盘」「我的文档库」，结果存在 st["my_docs"]。返回出错说明（没有就是空串）。"""
     now = time.time() if now is None else now
     if now - st.get("my_docs_at", 0) < DOC_LIST_EVERY_SEC:
         return ""

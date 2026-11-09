@@ -29,6 +29,23 @@ AGENT_KEYS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_T
 SID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
 
 
+def find_git_bash(path: str = "") -> str | None:
+    """找 Git 自带的 bash.exe。Git 不一定装在 C:\\Program Files\\Git（比如装在 E 盘），
+    所以先顺着 git 命令的位置找：<Git 目录>\\cmd\\git.exe → <Git 目录>\\bin\\bash.exe。"""
+    candidates = []
+    git = shutil.which("git", path=path or None)
+    if git:
+        root = Path(git).resolve().parent
+        for _ in range(3):  # git.exe 可能在 cmd\、bin\、mingw64\bin\ 下，往上找几层
+            candidates.append(root / "bin" / "bash.exe")
+            root = root.parent
+    candidates += [Path(r"C:\Program Files\Git\bin\bash.exe"), Path(r"C:\Program Files (x86)\Git\bin\bash.exe")]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return None
+
+
 def build_env() -> tuple[str, dict[str, str]]:
     conf = read_env(STATE / "agent.env")
     engine = conf.get("AGENT_ENGINE", "").strip() or "claude"
@@ -50,10 +67,9 @@ def build_env() -> tuple[str, dict[str, str]]:
         if appdata:
             extra.append(str(Path(appdata) / "npm"))   # npm 装的 claude / codebuddy 在这里
         if "CLAUDE_CODE_GIT_BASH_PATH" not in env:   # Claude Code 在 Windows 上要用 Git 自带的 bash 跑命令
-            for c in (r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files (x86)\Git\bin\bash.exe"):
-                if Path(c).exists():
-                    env["CLAUDE_CODE_GIT_BASH_PATH"] = c
-                    break
+            bash = find_git_bash(env.get("PATH", ""))
+            if bash:
+                env["CLAUDE_CODE_GIT_BASH_PATH"] = bash
     env["PATH"] = os.pathsep.join(extra + [env.get("PATH", "")])
     return engine, env
 

@@ -179,7 +179,7 @@ if (Has-Value $mailEnv "MAIL_PASSWORD") {
 
 if (Test-Path (Join-Path $State "feishu_user_token.json")) {
     Install-Job "collect-feishu" 8 (Every10) @($py, "`"$ops\collect_feishu.py`"")
-} else { Say "    跳过飞书采集：还没以你本人身份授权（先运行 python ops\feishu_auth.py）" }
+} else { Say "    跳过飞书采集：还没以你本人身份授权（先运行 py ops\feishu_auth.py）" }
 
 Install-Job "extract-text" 8 (Every10) @($py, "`"$ops\extract_text.py`"")
 
@@ -208,7 +208,10 @@ if (-not $found) {
 }
 Say ""
 if ($found) { Say "底座：$engine 已安装。" } else { Say "⚠️ 底座 $engine 还没装，按教程「装底座」那一步装。" }
-if ($engine -eq "claude" -and -not (Test-Path "C:\Program Files\Git\bin\bash.exe")) {
-    Say "⚠️ 没找到 Git（Claude Code 在 Windows 上要用 Git 自带的 bash）：winget install Git.Git"
+if ($engine -eq "claude") {
+    # Claude Code 在 Windows 上要用 Git 自带的 bash。Git 不一定装在 C 盘，顺着 git 命令的位置找
+    $bash = & $Py -X utf8 -c "import sys; sys.path.insert(0, r'$ops'); import run_agent; print(run_agent.find_git_bash() or '')"
+    if ($bash) { Say "Git 的 bash：$bash" }
+    else { Say "⚠️ 没找到 Git 自带的 bash.exe（Claude Code 要用）。装了 Git 的话，在 agent.env 里加一行 CLAUDE_CODE_GIT_BASH_PATH=你的Git目录\bin\bash.exe" }
 }
 Say "全部定时任务：任务计划程序 → 任务计划程序库，名字以 AgentOS- 开头。日志在 $Logs"

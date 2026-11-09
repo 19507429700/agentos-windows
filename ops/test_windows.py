@@ -178,5 +178,20 @@ class PushKbGuardTest(unittest.TestCase):
                 push_kb.REPO = old
 
 
+class GitBashTest(unittest.TestCase):
+    def test_find_bash_next_to_git(self):
+        """Git 不在 C:\\Program Files（比如装在 E 盘）：顺着 git 命令的位置找到 bin\\bash.exe。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "E盘" / "Git"
+            (root / "cmd").mkdir(parents=True)
+            (root / "bin").mkdir()
+            git = root / "cmd" / "git"
+            git.write_text("#!/bin/sh\n", encoding="utf-8")
+            git.chmod(0o755)
+            (root / "bin" / "bash.exe").write_text("", encoding="utf-8")
+            self.assertEqual(run_agent.find_git_bash(str(root / "cmd")), str((root / "bin" / "bash.exe").resolve()))
+            self.assertIsNone(run_agent.find_git_bash(str(Path(tmp) / "没有git")))
+
+
 if __name__ == "__main__":
     unittest.main()

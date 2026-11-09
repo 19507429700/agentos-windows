@@ -38,8 +38,8 @@ AI 读到你的真实工作信息后，能每天省下至少 30 分钟，并且�
 |---|---|
 | systemd service / timer | launchd（LaunchAgent），D4 的定时任务也用 launchd |
 | Linux 用户 agent / bridge | 隐藏用户 `agentos` 跑 Claude；桥接服务用你自己的账号 |
-| `/srv/agentos`，从 GitHub 拉取 | `/Users/agentos/agentos`，从本地 `~/AgentOS` 克隆；GitHub 私有仓库作远程备份 |
-| 凭据在 `/home/agent/.env` 等 | Claude 令牌 `/Users/agentos/.env`；飞书等发送凭据 `~/.agentos/bridge.env` |
+| `/srv/agentos`，从 GitHub 拉取 | `/home/agentos/agentos`，从本地 `~/AgentOS` 克隆；GitHub 私有仓库作远程备份 |
+| 凭据在 `/home/agent/.env` 等 | Claude 令牌 `/home/agentos/.env`；飞书等发送凭据 `~/.agentos/bridge.env` |
 | Tailscale 连常开电脑 | 不需要：微信和 Agent 在同一台机器 |
 
 额外加的一条边界：桥接服务从 `~/AgentOS` 运行，agentos 对它只读，Agent 无法通过改桥接代码绕过确认。

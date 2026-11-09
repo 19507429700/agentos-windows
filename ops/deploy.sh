@@ -8,5 +8,5 @@ if [[ -n "$(git -C "$REPO" status --porcelain)" ]]; then
   git -C "$REPO" status --short >&2
 fi
 
-sudo -n -H -u agentos /usr/bin/git -C /Users/agentos/agentos pull --ff-only
-launchctl kickstart -k "gui/$(id -u)/com.agentos.bridge" && echo "桥接服务已重启"
+sudo -n -H -u agentos /usr/bin/git -C /home/agentos/agentos pull --ff-only
+systemctl --user restart agentos-bridge.service && echo "桥接服务已重启"

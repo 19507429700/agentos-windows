@@ -95,7 +95,7 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        runtime = os.environ.get("AGENTOS_RUNTIME", "/Users/agentos/agentos")
+        runtime = os.environ.get("AGENTOS_RUNTIME", "/home/agentos/agentos")
         agent_user = os.environ.get("AGENT_USER", "agentos")
         override = os.environ.get("AGENTOS_CLAUDE_CMD")  # 仅测试用：绕过 sudo 直接跑某个命令
         cmd = shlex.split(override) if override else [

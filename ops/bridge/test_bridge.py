@@ -333,7 +333,7 @@ class DraftConfirmTest(unittest.TestCase):
 
     def test_invalid_drafts_reported_not_carded(self):
         self.draft("a.json", to=["不是邮箱"])
-        self.draft("b.json", attachments=["/Users/syzlmacx/.agentos/bridge.env"])
+        self.draft("b.json", attachments=["/home/someone/.agentos/bridge.env"])
         self.draft("c.json", attachments=["spaces/me/outbox/../../../../.env"])
         (self.pending / "d.json").write_text("{坏")
         self.b.scan_drafts(settle_sec=0)

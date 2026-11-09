@@ -1,5 +1,5 @@
 #!/bin/bash
-# 每日复盘（launchd 每天 23:00 经 run-job.sh 调用；也可手动试跑）：ops/daily-review.sh [YYYY-MM-DD]
+# 每日复盘（systemd 定时器每天 23:00 经 run-job.sh 调用；也可手动试跑）：ops/daily-review.sh [YYYY-MM-DD]
 #   1. 补采一遍邮箱和飞书（对应计划书的 22:55 补采）
 #   2. 以 agentos 身份让 Agent 按 daily-review 技能写复盘：全文进 kb/daily/<日期>.md，回复一页摘要
 #   3. 摘要推到你的飞书 + 微信
@@ -7,10 +7,10 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-RUNTIME=/Users/agentos/agentos
+RUNTIME=/home/agentos/agentos
 DAY="${1:-$(date +%F)}"
 [[ "$DAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "日期格式应为 YYYY-MM-DD" >&2; exit 2; }
-YESTERDAY="$(date -j -v-1d -f %F "$DAY" +%F)"
+YESTERDAY="$(/usr/bin/python3 -c 'import datetime,sys; print(datetime.date.fromisoformat(sys.argv[1]) - datetime.timedelta(days=1))' "$DAY")"
 RAW="$RUNTIME/spaces/me/raw"
 
 echo "==> $(date '+%F %T') 每日复盘 ${DAY}"

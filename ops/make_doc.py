@@ -30,24 +30,23 @@ TARGETS = {".docx": "docx:MS Word 2007 XML", ".pdf": "pdf", ".html": "html:XHTML
            ".txt": "txt:Text (encoded):UTF8", ".xlsx": "xlsx", ".pptx": "pptx", ".png": "png", ".jpg": "jpg"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 MAX_IMG_WIDTH = 560  # 嵌进 Word / PDF 的图最宽多少像素（大约一页宽）
-CSS = ("body{font-family:'Hiragino Sans GB','PingFang SC','Microsoft YaHei',sans-serif;font-size:11pt;line-height:1.6}"
+CSS = ("body{font-family:'Noto Sans CJK SC','Noto Serif CJK SC','Microsoft YaHei',sans-serif;font-size:11pt;line-height:1.6}"
        "table{border-collapse:collapse}td,th{border:1px solid #999;padding:4px 8px}h1{font-size:18pt}")
 
 
 # 无界面模式下 LibreOffice 用自带的 fontconfig 找字体，默认只看得到它自带的西文字体，中文转 PDF 会变方框；
-# 每次转换给它一份配置，指向系统字体目录。
+# 每次转换给它一份配置，指向系统字体目录（Linux 的中文字体来自 apt 装的 fonts-noto-cjk）。
 FONTS_CONF = """<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-<fontconfig><dir>/System/Library/Fonts</dir><dir>/Library/Fonts</dir><cachedir>{cache}</cachedir></fontconfig>
+<fontconfig><dir>/usr/share/fonts</dir><dir>/usr/local/share/fonts</dir><cachedir>{cache}</cachedir></fontconfig>
 """
 
 
 def find_soffice() -> str:
-    for c in (shutil.which("soffice"), "/opt/homebrew/bin/soffice",
-              "/Applications/LibreOffice.app/Contents/MacOS/soffice"):
+    for c in (shutil.which("soffice"), "/usr/bin/soffice", "/usr/lib/libreoffice/program/soffice"):
         if c and Path(c).exists():
             return c
-    sys.exit("没装 LibreOffice（soffice），无法转换。请让用户运行：brew install --cask libreoffice")
+    sys.exit("没装 LibreOffice（soffice），无法转换。请让用户运行：sudo apt install libreoffice-writer fonts-noto-cjk")
 
 
 def image_size(path: Path) -> tuple[int, int] | None:

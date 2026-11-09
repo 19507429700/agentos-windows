@@ -15,7 +15,7 @@
 有失败且全部失败退出码 2（供 run-job.sh 告警），部分成功退出码 1，没有失败 0。
 
 配置（环境变量，或 ~/.agentos/wechat.env）：
-  AGENTOS_RAW    原文根目录，默认 /Users/agentos/agentos/spaces/me/raw
+  AGENTOS_RAW    原文根目录，默认 /home/agentos/agentos/spaces/me/raw
   WECHAT_ARTICLES_INBOX  抓好的 .md 放哪，默认 ~/.agentos/wechat-articles-inbox
   WECHAT_FETCH_PY   fetch_wx.py 路径，默认本脚本同目录 fetch_wx.py
   WECHAT_FETCH_PYTHON  运行 fetch_wx.py 的 Python（带 requests+bs4），默认 ~/.agentos/wxfetch-python/bin/python

@@ -197,7 +197,7 @@ def discover_p2p(st: dict, initial_days: int, http=fu.http_json, now: float | No
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    raw_dir = Path(os.environ.get("AGENTOS_RAW", "/Users/agentos/agentos/spaces/me/raw"))
+    raw_dir = Path(os.environ.get("AGENTOS_RAW", "/home/agentos/agentos/spaces/me/raw"))
     initial_days = int(os.environ.get("FEISHU_INITIAL_DAYS", "30"))
     st = load_state()
     try:

@@ -8,7 +8,7 @@
 配置 ~/.agentos/mail.env（权限 600）：
   MAIL_IMAP_HOST=imap.qq.com   MAIL_USER=...   MAIL_PASSWORD=<授权码，不是登录密码>
 可选：MAIL_IMAP_PORT=993  MAIL_FOLDERS=INBOX  MAIL_INITIAL_DAYS=7
-输出：$AGENTOS_RAW/mail/<日期>/<时分秒>-<UID>.md，默认 AGENTOS_RAW=/Users/agentos/agentos/spaces/me/raw
+输出：$AGENTOS_RAW/mail/<日期>/<时分秒>-<UID>.md，默认 AGENTOS_RAW=/home/agentos/agentos/spaces/me/raw
 状态：~/.agentos/mail_state.json（每个文件夹的 UIDVALIDITY 和已拉到的 UID）
 
 底线：邮件只用 BODY.PEEK 读，不改已读状态；已存在的原文文件永不覆盖；拉取失败退出码非 0（供告警）。
@@ -241,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     port = int(os.environ.get("MAIL_IMAP_PORT", "993"))
     folders = [f.strip() for f in os.environ.get("MAIL_FOLDERS", "INBOX").split(",") if f.strip()]
-    raw_dir = Path(os.environ.get("AGENTOS_RAW", "/Users/agentos/agentos/spaces/me/raw"))
+    raw_dir = Path(os.environ.get("AGENTOS_RAW", "/home/agentos/agentos/spaces/me/raw"))
     initial_days = int(os.environ.get("MAIL_INITIAL_DAYS", "7"))
     state_path = STATE_DIR / "mail_state.json"
 

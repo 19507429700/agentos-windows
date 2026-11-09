@@ -5,10 +5,12 @@
 做法：在 raw/ 下每个这类文件旁边写一个「原文件名 + .txt」（如 01.png.txt、课件.pdf.txt），
 开头写明原文件和所在文档，后面是提取出来的文字。原文件不动，raw/ 依旧只追加。
 
-- 图片（png/jpg/gif/webp/heic…）：macOS 自带的 Vision 识字（中英文），见 ops/extract_text.js
-- PDF：先取文字层；某页几乎没字（扫描版）就把这一页渲染成图片再识字
-- Word（.docx）、PPT（.pptx）：直接读文件里的文字；.doc / .rtf 用系统自带的 textutil
-每轮最多跑 DEFAULT_BUDGET_SEC 秒，做不完的下一轮接着做（launchd 每 10 分钟）。
+- 图片（png/jpg/gif/webp/bmp/tif）：tesseract 识字（简体、繁体、英文）
+- PDF：poppler 的 pdftotext 取文字层；某页字很少（扫描版）就用 pdftoppm 把这一页渲染成图片再识字，取字多的
+- Word（.docx）、PPT（.pptx）：直接读文件里的文字；.doc / .rtf 用 LibreOffice 转成文字
+这些工具 bootstrap-linux.sh 已经用 apt 装好（tesseract-ocr、tesseract-ocr-chi-sim、poppler-utils、libreoffice）。
+（Mac 版用的是 macOS 自带的 Vision 和 PDFKit，识字更快更准；对外的结果格式两边一样。）
+每轮最多跑 DEFAULT_BUDGET_SEC 秒，做不完的下一轮接着做（systemd 定时器每 10 分钟）。
 
 用法（以你本人账号跑，只用标准库，兼容 /usr/bin/python3）：
   python3 ops/extract_text.py            # 做一轮
@@ -32,9 +34,8 @@ from html import unescape
 from pathlib import Path
 
 STATE_DIR = Path(os.environ.get("AGENTOS_STATE_DIR", Path.home() / ".agentos"))
-JS = Path(__file__).resolve().parent / "extract_text.js"
 
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".bmp", ".tif", ".tiff"}
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}  # tesseract 读不了 heic
 PDF_EXTS = {".pdf"}
 ZIP_EXTS = {".docx", ".pptx"}
 TEXTUTIL_EXTS = {".doc", ".rtf"}
@@ -43,14 +44,18 @@ ALL_EXTS = IMAGE_EXTS | PDF_EXTS | ZIP_EXTS | TEXTUTIL_EXTS
 MAX_FILE_BYTES = 50 * 1024 * 1024
 MIN_IMAGE_BYTES = 1024           # 太小的多半是图标、分割线，不识
 DEFAULT_BUDGET_SEC = 240
-IMAGE_BATCH = 20                 # 一次 osascript 识多少张图（省掉每次启动的时间）
-OSA_TIMEOUT_SEC = 200
+IMAGE_BATCH = 20                 # 一批识多少张图（每批做完检查一次时间预算）
+OCR_TIMEOUT_SEC = 120             # 一张图、一页 PDF 最多识多久
+TESS_LANG = "chi_sim+chi_tra+eng"
+MIN_PAGE_TEXT = 200              # PDF 某页文字层少于这么多字，就再识一遍字，取字多的（扫描版常常只有页眉页码是文字）
+MAX_PDF_PAGES = 300
+RENDER_DPI = 200
 FAIL_RETRY_SEC = 86400           # 失败的一天后再试
 SIDECAR_SUFFIX = ".txt"
 
 
 def raw_dir() -> Path:
-    return Path(os.environ.get("AGENTOS_RAW", "/Users/agentos/agentos/spaces/me/raw"))
+    return Path(os.environ.get("AGENTOS_RAW", "/home/agentos/agentos/spaces/me/raw"))
 
 
 def state_path() -> Path:
@@ -178,27 +183,68 @@ def read_pptx(p: Path) -> list[tuple[int, str]]:
     return out
 
 
-def read_textutil(p: Path) -> str:
-    r = subprocess.run(["/usr/bin/textutil", "-convert", "txt", "-stdout", str(p)],
-                       capture_output=True, timeout=60)
+def _run(cmd: list[str], timeout: int = OCR_TIMEOUT_SEC) -> str:
+    r = subprocess.run(cmd, capture_output=True, timeout=timeout)
     if r.returncode != 0:
-        raise RuntimeError((r.stderr or b"").decode("utf-8", "replace").strip() or "textutil 转换失败")
+        err = (r.stderr or b"").decode("utf-8", "replace").strip()
+        raise RuntimeError(f"{Path(cmd[0]).name} 失败：{err[:300] or r.returncode}")
     return r.stdout.decode("utf-8", "replace")
 
 
-def osa_extract(paths: list[Path]) -> dict[str, dict]:
-    """调 extract_text.js（Vision 识字、PDFKit）。返回 {路径: 结果}。"""
-    r = subprocess.run(["/usr/bin/osascript", "-l", "JavaScript", str(JS), *map(str, paths)],
-                       capture_output=True, timeout=OSA_TIMEOUT_SEC)
+def read_office_text(p: Path) -> str:
+    """.doc / .rtf：LibreOffice 转成纯文字。用临时的配置目录，免得和 Agent 出文件时抢同一个。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        _run(["soffice", f"-env:UserInstallation=file://{tmp}/profile", "--headless",
+              "--convert-to", "txt:Text (encoded):UTF8", "--outdir", tmp, str(p)], timeout=180)
+        out = Path(tmp) / (p.stem + ".txt")
+        if not out.exists():
+            raise RuntimeError("LibreOffice 没有转出文字")
+        return out.read_text(encoding="utf-8", errors="replace")
+
+
+def _count(s: str) -> int:
+    return len(re.sub(r"\s", "", s))
+
+
+def tesseract(path: Path) -> str:
+    return _run(["tesseract", str(path), "stdout", "-l", TESS_LANG]).strip()
+
+
+def pdf_pages(p: Path) -> tuple[list[dict], int]:
+    """每页先取文字层；字太少就把这一页渲染成图片识字，取字多的那个。"""
+    m = re.search(r"^Pages:\s+(\d+)", _run(["pdfinfo", str(p)], timeout=60), re.M)
+    total = int(m.group(1)) if m else 0
+    layers = _run(["pdftotext", "-enc", "UTF-8", str(p), "-"], timeout=180).split("\f")
+    pages = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for i in range(min(total, MAX_PDF_PAGES)):
+            layer = layers[i].strip() if i < len(layers) else ""
+            if _count(layer) >= MIN_PAGE_TEXT:
+                pages.append({"n": i + 1, "how": "text", "text": layer})
+                continue
+            prefix = Path(tmp) / f"p{i + 1}"
+            _run(["pdftoppm", "-f", str(i + 1), "-l", str(i + 1), "-r", str(RENDER_DPI),
+                  "-png", "-singlefile", str(p), str(prefix)])
+            ocr = tesseract(prefix.with_suffix(".png"))
+            pages.append({"n": i + 1, "how": "ocr", "text": ocr} if _count(ocr) > _count(layer)
+                         else {"n": i + 1, "how": "text", "text": layer})
+    return pages, total
+
+
+def ocr_extract(paths: list[Path]) -> dict[str, dict]:
+    """图片识字、PDF 取文字。返回 {路径: 结果}，格式和 Mac 版 extract_text.js 一样：
+    图片 {"ok", "kind": "ocr", "text"}；PDF {"ok", "kind": "pdf", "pages": [{"n", "how", "text"}], "total"}；
+    失败 {"ok": False, "error"}。"""
     out = {}
-    for line in r.stdout.decode("utf-8", "replace").splitlines():
+    for p in paths:
         try:
-            d = json.loads(line)
-        except ValueError:
-            continue
-        out[d.get("path", "")] = d
-    if not out and r.returncode != 0:
-        raise RuntimeError((r.stderr or b"").decode("utf-8", "replace").strip()[:300] or "osascript 失败")
+            if p.suffix.lower() in PDF_EXTS:
+                pages, total = pdf_pages(p)
+                out[str(p)] = {"path": str(p), "ok": True, "kind": "pdf", "pages": pages, "total": total}
+            else:
+                out[str(p)] = {"path": str(p), "ok": True, "kind": "ocr", "text": tesseract(p)}
+        except (RuntimeError, subprocess.TimeoutExpired, OSError, ValueError) as e:
+            out[str(p)] = {"path": str(p), "ok": False, "error": f"{type(e).__name__}: {e}"}
     return out
 
 
@@ -226,8 +272,8 @@ def write_sidecar(p: Path, base: Path, how: str, body: str) -> None:
 def pdf_body(d: dict) -> tuple[str, str]:
     pages = d.get("pages") or []
     hows = {pg["how"] for pg in pages if pg.get("text", "").strip()}
-    how = {frozenset({"text"}): "PDF 文字层", frozenset({"ocr"}): "PDF 扫描页识字（macOS Vision）"}.get(
-        frozenset(hows), "PDF 文字层 + 扫描页识字（macOS Vision）")
+    how = {frozenset({"text"}): "PDF 文字层", frozenset({"ocr"}): "PDF 扫描页识字（tesseract）"}.get(
+        frozenset(hows), "PDF 文字层 + 扫描页识字（tesseract）")
     parts = [f"## 第 {pg['n']} 页\n\n{pg['text'].strip()}" for pg in pages if pg.get("text", "").strip()]
     try:
         total = int(d.get("total", len(pages)))
@@ -238,7 +284,7 @@ def pdf_body(d: dict) -> tuple[str, str]:
     return how, "\n\n".join(parts)
 
 
-def process(base: Path, st: dict, budget_sec: float = DEFAULT_BUDGET_SEC, osa=osa_extract) -> dict:
+def process(base: Path, st: dict, budget_sec: float = DEFAULT_BUDGET_SEC, osa=ocr_extract) -> dict:
     now = time.time()
     todo = candidates(base, st, now)
     counts = {"ok": 0, "empty": 0, "fail": 0, "img": 0, "pdf": 0, "doc": 0}
@@ -265,7 +311,7 @@ def process(base: Path, st: dict, budget_sec: float = DEFAULT_BUDGET_SEC, osa=os
     while i < len(todo) and time.monotonic() < deadline:
         p = todo[i]
         ext = p.suffix.lower()
-        if ext in IMAGE_EXTS:  # 连着的图片一批交给 osascript
+        if ext in IMAGE_EXTS:  # 连着的图片一批一批识，每批做完检查一次时间
             batch = []
             while i < len(todo) and todo[i].suffix.lower() in IMAGE_EXTS and len(batch) < IMAGE_BATCH:
                 batch.append(todo[i])
@@ -283,7 +329,7 @@ def process(base: Path, st: dict, budget_sec: float = DEFAULT_BUDGET_SEC, osa=os
                 if not d or not d.get("ok"):
                     record(b, "fail", (d or {}).get("error", "没有返回结果"))
                 else:
-                    finish(b, "图片识字（macOS Vision）", d.get("text", ""), "img")
+                    finish(b, "图片识字（tesseract）", d.get("text", ""), "img")
             save_state(st)
             continue
         i += 1
@@ -302,7 +348,7 @@ def process(base: Path, st: dict, budget_sec: float = DEFAULT_BUDGET_SEC, osa=os
                 body = "\n\n".join(f"## 第 {n} 页\n\n{t}" for n, t in read_pptx(p) if t.strip())
                 finish(p, "PPT 每页文字", body, "doc")
             else:
-                finish(p, "textutil 转文字", read_textutil(p), "doc")
+                finish(p, "LibreOffice 转文字", read_office_text(p), "doc")
         except errors as e:
             record(p, "fail", f"{type(e).__name__}: {e}")
         save_state(st)  # 做一点存一点，中途被停也不白做

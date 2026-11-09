@@ -1,14 +1,13 @@
 #!/bin/bash
 # 以你的账号运行（不用 sudo）：ops/install-bridge.sh
-# 建 ~/.agentos（凭据、队列库、日志、venv），装 launchd 服务。可重复运行，会重启服务。
+# 建 ~/.agentos（凭据、队列库、日志、venv），装 systemd 用户服务 agentos-bridge。可重复运行，会重启服务。
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="$HOME/.agentos"
 ENV_FILE="$STATE/bridge.env"
-PLIST="$HOME/Library/LaunchAgents/com.agentos.bridge.plist"
-LABEL="gui/$(id -u)/com.agentos.bridge"
-UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
+# shellcheck source=ops/systemd.sh
+source "$REPO/ops/systemd.sh"
 
 mkdir -p "$STATE/logs"
 chmod 700 "$STATE"
@@ -20,8 +19,10 @@ FEISHU_APP_ID=
 FEISHU_APP_SECRET=
 # 第一次给机器人发消息，它会回你的 open_id，填到这里后重新运行 install-bridge.sh
 OWNER_OPEN_ID=
+# 可选：告警和复盘同时推到微信（PushPlus 的令牌）
+PUSHPLUS_TOKEN=
 # 以下一般不用改
-AGENTOS_RUNTIME=/Users/agentos/agentos
+AGENTOS_RUNTIME=/home/agentos/agentos
 MAX_CONCURRENCY=2
 STUCK_NOTICE_MIN=15
 HARD_TIMEOUT_MIN=45
@@ -31,24 +32,17 @@ fi
 chmod 600 "$ENV_FILE"
 
 echo "==> Python 环境"
-[[ -x "$STATE/venv/bin/python" ]] || "$UV" venv --python 3.12 "$STATE/venv"
-VIRTUAL_ENV="$STATE/venv" "$UV" pip install -q -r "$REPO/ops/bridge/requirements.txt"
-
-echo "==> launchd"
-mkdir -p "$(dirname "$PLIST")"
-sed -e "s#__HOME__#$HOME#g" -e "s#__REPO__#$REPO#g" "$REPO/ops/launchd/com.agentos.bridge.plist" > "$PLIST"
-plutil -lint "$PLIST" >/dev/null
+[[ -x "$STATE/venv/bin/python" ]] || /usr/bin/python3 -m venv "$STATE/venv"
+"$STATE/venv/bin/python" -m pip install -q --upgrade pip
+"$STATE/venv/bin/python" -m pip install -q -r "$REPO/ops/bridge/requirements.txt"
 
 if ! grep -qE '^FEISHU_APP_ID=.+' "$ENV_FILE" || ! grep -qE '^FEISHU_APP_SECRET=.+' "$ENV_FILE"; then
-  echo "飞书凭据还没填，服务已装好但未启动。填完 $ENV_FILE 后重新运行本脚本。"
+  echo "飞书凭据还没填，服务没有启动。填完 $ENV_FILE 后重新运行本脚本。"
   exit 0
 fi
 
-launchctl bootout "$LABEL" 2>/dev/null || true
-# bootout 是异步的，旧服务没退干净就 bootstrap 会报 Input/output error
-for _ in {1..20}; do launchctl print "$LABEL" &>/dev/null || break; sleep 0.5; done
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
-launchctl kickstart -k "$LABEL"
+echo "==> 飞书机器人服务（systemd）"
+install_service bridge -- "$STATE/venv/bin/python" "$REPO/ops/bridge/bridge.py"
 sleep 3
-launchctl print "$LABEL" | grep -E '^\s+(state|pid) =' || true
+systemctl --user --no-pager --lines=0 status agentos-bridge.service | sed -n '1,4p' || true
 echo "日志：tail -f $STATE/logs/bridge.log"

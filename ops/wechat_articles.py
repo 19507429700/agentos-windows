@@ -16,7 +16,7 @@
   python3 ops/wechat_articles.py skip <链接> [原因]  # 文章已删除/下架：记为失效，以后不再列出、不再抓
 
 配置（环境变量，或 ~/.agentos/wechat.env）：
-  AGENTOS_RAW   原文根目录，默认 /Users/agentos/agentos/spaces/me/raw
+  AGENTOS_RAW   原文根目录，默认 /home/agentos/agentos/spaces/me/raw
   WECHAT_ARTICLES_INBOX  你抓好的 .md 放哪，默认 ~/.agentos/wechat-articles-inbox
 状态：~/.agentos/wechat_articles.json（done：已归档；gone：已失效。去重用）
 只用标准库，兼容 /usr/bin/python3。
@@ -156,7 +156,7 @@ def load_env(path: Path) -> None:
 
 
 def raw_dir() -> Path:
-    return Path(os.environ.get("AGENTOS_RAW", "/Users/agentos/agentos/spaces/me/raw"))
+    return Path(os.environ.get("AGENTOS_RAW", "/home/agentos/agentos/spaces/me/raw"))
 
 
 def inbox_dir() -> Path:

@@ -16,7 +16,7 @@
   WECHAT_INITIAL_DAYS  每个会话首次采集回溯多少天，默认 3
   WECHAT_GROUPS    采哪些群（逗号/顿号分隔）：填群名关键词或群 id；私聊一律全采，群只采命中的。留空只采私聊
   WECHAT_FILES_MAX_MB  文件消息里的真实文件（PDF/Word 等）复制进知识库的大小上限，默认 25；填 0 关闭
-  AGENTOS_RAW      原文根目录，默认 /Users/agentos/agentos/spaces/me/raw
+  AGENTOS_RAW      原文根目录，默认 /home/agentos/agentos/spaces/me/raw
 
 输出：$AGENTOS_RAW/wechat/<日期>/<会话名>-<会话id后6位>.md，每条一行「- 时:分 发送人：内容」，只追加。
 状态：~/.agentos/wechat_state.json（每个会话采到哪条、会话所在的库、名字缓存）
@@ -335,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
     tool = Path(os.environ.get("WECHAT_TOOL", Path.home() / "wechat-tool")).expanduser()
     initial_days = int(os.environ.get("WECHAT_INITIAL_DAYS", "3"))
     files_max_mb = float(os.environ.get("WECHAT_FILES_MAX_MB", "25"))  # 0 关闭文件搬运
-    raw_dir = Path(os.environ.get("AGENTOS_RAW", "/Users/agentos/agentos/spaces/me/raw"))
+    raw_dir = Path(os.environ.get("AGENTOS_RAW", "/home/agentos/agentos/spaces/me/raw"))
     # db_root 形如 .../xwechat_files/wxid_xxx_yyyy/db_storage，自己的 wxid 是账号目录名去掉末尾 _yyyy
     self_id = os.environ.get("WECHAT_SELF_ID") or root.parent.name.rsplit("_", 1)[0]
     groups = [g.strip() for g in re.split(r"[,，、\n]", os.environ.get("WECHAT_GROUPS", "")) if g.strip()]

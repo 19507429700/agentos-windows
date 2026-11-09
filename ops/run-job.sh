@@ -1,10 +1,10 @@
 #!/bin/bash
-# 定时任务统一包装（launchd 调用）：ops/run-job.sh <任务名> <超时分钟> -- <命令…>
+# 定时任务统一包装（systemd 定时器调用）：ops/run-job.sh <任务名> <超时分钟> -- <命令…>
 #   成功：去 healthchecks.io 打卡（~/.agentos/healthchecks.env 里配了这个任务的地址才打）
 #   失败/超时：推飞书 + 微信（哪个任务、退出码、日志最后 20 行）；不打卡
-#   分工：出错由这里推飞书/微信；Mac 关机/睡着/断网导致没打卡，由 healthchecks 发邮件，两边不重复
+#   分工：出错由这里推飞书/微信；电脑关机/睡着/断网导致没打卡，由 healthchecks 发邮件，两边不重复
 #   同一任务连续失败只在第一次告警，恢复时再通知一次，避免每 10 分钟刷屏
-# 任务自己的输出照常写进 launchd 日志。
+# 任务自己的输出照常写进 ~/.agentos/logs/<任务名>.log。
 set -uo pipefail
 
 NAME="$1"; TIMEOUT_MIN="$2"; shift 2
@@ -20,7 +20,7 @@ trap 'rm -f "$OUT" "$OUT.timeout"' EXIT
 # ---------- 跑任务（带超时）----------
 "$@" >"$OUT" 2>&1 &
 pid=$!
-# 看门狗每秒看一眼：任务结束它就自己退出（不能用一个长 sleep，否则任务结束后它还挂着，launchd 会当任务没跑完）
+# 看门狗每秒看一眼：任务结束它就自己退出（不能用一个长 sleep，否则任务结束后它还挂着，任务会被当成没跑完）
 ( end=$((SECONDS + TIMEOUT_MIN * 60))
   while kill -0 "$pid" 2>/dev/null; do
     if (( SECONDS >= end )); then
@@ -44,9 +44,7 @@ fi
 hc_ping() {  # 成功打卡：只访问地址、不带任何内容（日志里有群名人名，不往国外服务发）；走系统代理
   [[ -n "$HC_URL" ]] || return 0
   local proxy=""
-  if [[ "$(scutil --proxy | awk '/HTTPSEnable/ {print $3}')" == "1" ]]; then
-    proxy="http://$(scutil --proxy | awk '/HTTPSProxy/ {print $3}'):$(scutil --proxy | awk '/HTTPSPort/ {print $3}')"
-  fi
+  [[ -s "$STATE/proxy" ]] && proxy="$(head -1 "$STATE/proxy")"  # bootstrap-linux.sh 写的；没有就直连
   curl -fsS -m 15 --retry 2 ${proxy:+-x "$proxy"} -o /dev/null "$HC_URL" \
     || echo "（healthchecks 打卡失败，网络或地址有问题）"
 }

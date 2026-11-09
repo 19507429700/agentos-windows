@@ -1,4 +1,4 @@
-"""提取文字的离线测试：识字用假结果（不调 Vision），Word / PPT 用临时造的文件。
+"""提取文字的离线测试：识字用假结果（不调 tesseract），Word / PPT 用临时造的文件。
 
 运行：/usr/bin/python3 -m unittest ops/test_extract_text.py -v
 """
@@ -84,7 +84,7 @@ class ExtractTextTest(unittest.TestCase):
         c = self.run_once(osa)
         self.assertEqual((c["ok"], c["empty"], c["fail"], c["left"]), (4, 1, 1, 0))
         self.assertEqual((c["img"], c["pdf"], c["doc"]), (1, 1, 2))
-        # 聊天里的文件排在图片前面；图片一批交给 osascript；太小的图标不识
+        # 聊天里的文件排在图片前面；图片一批一批识；太小的图标不识
         self.assertEqual(osa.calls[0], [".archivetemp通信原理习题.pdf"])
         self.assertEqual(sorted(osa.calls[-1]), ["01.png", "02-blank.png", "03-bad.png"])
 
@@ -137,7 +137,7 @@ class ExtractTextTest(unittest.TestCase):
         def broken(paths):
             if paths[0].suffix == ".pdf":
                 return FakeOsa()(paths)
-            raise RuntimeError("osascript 失败")
+            raise RuntimeError("识字工具失败")
         c = self.run_once(broken)
         self.assertEqual(c["fail"], 3)
         self.assertEqual(c["pdf"], 1)  # PDF 是单独调用的，不受图片那批出错影响
@@ -157,6 +157,55 @@ class ExtractTextTest(unittest.TestCase):
             self.assertEqual([r[0] for r in rows], ["raw/wechat/files/2026-11-07/archivetemp通信原理习题.pdf.txt"])
         finally:
             db.close()
+
+
+class LinuxBackendTest(unittest.TestCase):
+    """Linux 版的识字后端：pdfinfo / pdftotext / pdftoppm / tesseract 用假输出代替。"""
+
+    def setUp(self):
+        self.calls = []
+        self._run = et._run
+
+        def fake_run(cmd, timeout=0):
+            self.calls.append(cmd[0])
+            if cmd[0] == "pdfinfo":
+                return "Title: x\nPages:          3\n"
+            if cmd[0] == "pdftotext":   # 第 1 页文字很多；第 2 页只有页眉；第 3 页空（扫描页）
+                return "正文" * 150 + "\f湖南大学 习题集 1\f\f"
+            if cmd[0] == "pdftoppm":
+                Path(cmd[-1] + ".png").write_bytes(b"png")
+                return ""
+            if cmd[0] == "tesseract":
+                if cmd[1].endswith("bad.png"):
+                    raise RuntimeError("tesseract 失败：读不了")
+                return "识出来的题目：信源、发送设备、信道、接收设备和信宿\n"
+            raise AssertionError(cmd)
+        et._run = fake_run
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        et._run = self._run
+        self.tmp.cleanup()
+
+    def test_pdf_pages_text_or_ocr(self):
+        pdf = self.dir / "a.pdf"
+        pdf.write_bytes(b"%PDF")
+        r = et.ocr_extract([pdf])[str(pdf)]
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["total"], 3)
+        self.assertEqual([(pg["n"], pg["how"]) for pg in r["pages"]], [(1, "text"), (2, "ocr"), (3, "ocr")])
+        self.assertIn("信源", r["pages"][1]["text"])
+        self.assertEqual(self.calls.count("pdftoppm"), 2)   # 文字多的第 1 页不用识字
+
+    def test_images_and_failures(self):
+        ok, bad = self.dir / "ok.png", self.dir / "bad.png"
+        ok.write_bytes(b"x"); bad.write_bytes(b"x")
+        r = et.ocr_extract([ok, bad])
+        self.assertEqual(r[str(ok)]["kind"], "ocr")
+        self.assertIn("接收设备", r[str(ok)]["text"])
+        self.assertFalse(r[str(bad)]["ok"])
+        self.assertIn("读不了", r[str(bad)]["error"])
 
 
 if __name__ == "__main__":

@@ -81,10 +81,28 @@ CODEBUDDY_INTERNET_ENVIRONMENT=internal
 
 # ---------- 2. Python 环境 ----------
 Say "==> 2/5 Python 环境"
+function Find-Python {
+    # 挨个试，用第一个真能运行、版本 3.9 以上的。电脑上登记过的 Python 可能已经被删了（py 的默认版本就会坏）
+    $candidates = @("py -3.12", "py -3.13", "py -3.11", "py -3.14", "py -3.10", "py -3.9", "py -3", "python")
+    foreach ($c in $candidates) {
+        $parts = $c.Split(" ")
+        if (-not (Get-Command $parts[0] -ErrorAction SilentlyContinue)) { continue }
+        try {
+            $rest = @($parts | Select-Object -Skip 1)
+            $out = (& $parts[0] @rest -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null)
+            if ($LASTEXITCODE -eq 0 -and "$out" -match "^3\.(\d+)$" -and [int]$Matches[1] -ge 9) {
+                return ,$parts
+            }
+        } catch { }
+    }
+    return $null
+}
 if (-not (Test-Path $Py)) {
-    if (Get-Command py -ErrorAction SilentlyContinue) { & py -3 -m venv $Venv }
-    elseif (Get-Command python -ErrorAction SilentlyContinue) { & python -m venv $Venv }
-    else { throw "没找到 Python。先运行：winget install Python.Python.3.12 ，关掉 PowerShell 重新打开，再跑本脚本。" }
+    $found = Find-Python
+    if ($null -eq $found) { throw "没找到能用的 Python（3.9 以上）。先运行：winget install Python.Python.3.12 ，关掉 PowerShell 重新打开，再跑本脚本。" }
+    Say "    用 $($found -join ' ') 建专用环境"
+    $rest = @($found | Select-Object -Skip 1)
+    & $found[0] @rest -m venv $Venv
     if (-not (Test-Path $Py)) { throw "建 Python 环境失败（$Venv）" }
 }
 & $Py -m pip install -q --disable-pip-version-check --upgrade pip

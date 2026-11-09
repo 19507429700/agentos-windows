@@ -50,7 +50,28 @@ Mac 版专门建了一个 agentos 账号给 AI 用，AI **在系统层面**就�
 
 ## 第一步：装软件
 
-一条一条运行，每条装完再下一条（可能弹窗问「是否允许更改」，点「是」）：
+**已经装过的可以跳过。** 先查一下：
+
+```powershell
+py --version
+```
+
+```powershell
+git --version
+```
+
+```powershell
+Test-Path "C:\Program Files\LibreOffice\program\soffice.exe"
+```
+
+- Python 显示 3.10 到 3.14 都行（最低 3.9），Git 能显示版本号就行，LibreOffice 显示 `True` 就是装过了；
+- **`py --version` 报错**（比如 `Unable to create process using ...`）：说明默认的那个 Python 坏了。运行 `py -0p` 看看电脑上还有哪些 Python，挑一个能用的设成默认（下面以 3.12 为例），关掉 PowerShell 重新打开再查：
+
+```powershell
+[Environment]::SetEnvironmentVariable("PY_PYTHON", "3.12", "User")
+```
+
+缺哪个装哪个。一条一条运行，每条装完再下一条（可能弹窗问「是否允许更改」，点「是」；LibreOffice 比较大，要下载几分钟）：
 
 ```powershell
 winget install -e --id Python.Python.3.12
@@ -77,6 +98,7 @@ git --version
 都能显示版本号就对了。
 
 > 提示 `winget` 找不到：在微软商店里搜「应用安装程序」装上；或者去官网手动下载安装 Python（安装时勾上「Add python.exe to PATH」）、Git、LibreOffice。
+> LibreOffice 用 winget 下载太慢：去清华镜像 `https://mirrors.tuna.tsinghua.edu.cn/libreoffice/libreoffice/stable/` → 最新版本号 → `win` → `x86_64`，下载 `Win_x86-64.msi` 结尾的那个，双击安装，不要改安装位置。
 
 ---
 
@@ -337,23 +359,49 @@ powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 
 ---
 
-## 第十步：邮箱
+## 第十步：邮箱（可以换邮箱）
+
+**用哪个邮箱都行**，QQ 邮箱、网易 163 邮箱都支持。和 Mac 上用的不是同一个也没关系，只是各自的复盘里只有各自邮箱的邮件。下面按你用的邮箱，**选一组**照着做。
+
+### 先拿授权码（不是登录密码）
+
+- **QQ 邮箱**：网页登录 QQ 邮箱 →「设置」→「账号」（新版界面在「账号与安全」）→ 找到「POP3/IMAP/SMTP 服务」→ 开启「IMAP/SMTP 服务」→ 按提示发短信验证 → 页面显示一串授权码，复制下来。
+- **网易 163 邮箱**：网页登录 163 邮箱 → 上方「设置」→「POP3/SMTP/IMAP」→ 开启「IMAP/SMTP 服务」→ 按提示发短信验证 → 页面显示一串授权码（**只显示一次**），复制下来。
+
+### 用 QQ 邮箱，运行这一组
 
 ```powershell
 py ops\set_key.py mail MAIL_IMAP_HOST imap.qq.com
 ```
 
-（163 邮箱换成 `imap.163.com`。）
-
 ```powershell
-py ops\set_key.py mail MAIL_USER 你的邮箱地址
+py ops\set_key.py mail MAIL_USER 这里换成你的QQ邮箱地址
 ```
 
 ```powershell
 py ops\set_key.py mail MAIL_PASSWORD
 ```
 
-（会让你粘贴授权码。）再运行一次安装脚本，它会先测试能不能登录邮箱，再装上邮件采集：
+### 用网易 163 邮箱，运行这一组
+
+```powershell
+py ops\set_key.py mail MAIL_IMAP_HOST imap.163.com
+```
+
+```powershell
+py ops\set_key.py mail MAIL_USER 这里换成你的163邮箱地址
+```
+
+```powershell
+py ops\set_key.py mail MAIL_PASSWORD
+```
+
+（每组最后一条会让你粘贴授权码，屏幕上不显示，是正常的。邮箱地址只换中文那几个字，比如 `py ops\set_key.py mail MAIL_USER abc@163.com`。）
+
+> 想换邮箱：按另一组再运行一遍，新的会覆盖旧的；然后重跑下面的安装脚本。
+> 网易邮箱登录时要先报上客户端的名字，不然会报「Unsafe Login」，采集脚本已经处理好了。
+
+再运行一次安装脚本，它会先测试能不能登录邮箱，再装上邮件采集：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
@@ -443,5 +491,5 @@ py ops\deploy.py
 - 第六步 机器人连上飞书（日志里有没有 `connected`）：
 - 第八步 手机发消息有回复：
 - 第九步 飞书授权：
-- 第十步 邮箱、任务计划程序里的 AgentOS- 任务：
+- 第十步 用的哪个邮箱、任务计划程序里的 AgentOS- 任务：
 - 第十二步 出 Word 中文正常、截图里的字能搜到、复盘、备份：

@@ -10,10 +10,10 @@ description: 会前材料：用户说「明天见某某，帮我准备一下」�
 ## 步骤
 1. 弄清：见谁（人名 / 公司）、什么时候、什么事。缺「见谁」就先问，其他缺了可以先做。
 2. 读 `spaces/me/kb/profile.md`，以及 `kb/people/<对方>.md`、相关 `kb/projects/` 页面。
-3. 查往来原文：`python3 ops/search.py <对方名字>`，再用公司名、项目名、关键词各搜一遍；必要时读整个文件看上下文。找出：上次谈到哪、答应了什么、谁在等谁、悬而未决的事。
+3. 查往来原文：`python ops/search.py <对方名字>`，再用公司名、项目名、关键词各搜一遍；必要时读整个文件看上下文。找出：上次谈到哪、答应了什么、谁在等谁、悬而未决的事。
 4. 对方背景（公司、职位、公开信息）用 WebSearch / WebFetch 查，附来源链接；只用公开、和会议相关的信息。
 5. 按下面结构把 Markdown 写到草稿目录 `spaces/me/outbox/草稿/<任务号>/会前材料.md`，再转 Word 放进成品目录：
-   `python3 ops/make_doc.py spaces/me/outbox/草稿/<任务号>/会前材料.md spaces/me/outbox/<任务号>/会前材料-<对方>-<日期>.docx`
+   `python ops/make_doc.py spaces/me/outbox/草稿/<任务号>/会前材料.md spaces/me/outbox/<任务号>/会前材料-<对方>-<日期>.docx`
    （`outbox/<任务号>/` 里的每个文件都会发给用户，所以中间稿一律放 `outbox/草稿/<任务号>/`。）
 6. 回复用户 3–5 行：最关键的一点、建议先问的问题，并说「材料已发到飞书」。
 

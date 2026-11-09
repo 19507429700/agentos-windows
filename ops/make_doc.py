@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """文档转换（Agent 用）：Markdown / HTML / Word 之间互转，以及转 PDF。底层是 LibreOffice。
 
-  python3 ops/make_doc.py 输入.md   输出.docx      # Markdown → Word
-  python3 ops/make_doc.py 输入.html 输出.pdf       # HTML → PDF
-  python3 ops/make_doc.py 模板.docx 模板.html      # Word 模板 → HTML（读结构、照着填）
-  python3 ops/make_doc.py 输入.docx 输出.txt       # Word → 纯文本（读用户发来的 Word）
-  python3 ops/make_doc.py 图.png    输出.png       # 复制一张图（如飞书文档里下载的图），放进 outbox 就作为图片消息发出
-  python3 ops/make_doc.py 画的.svg  输出.png       # SVG（自己画的示意图、图表）→ PNG
+  python ops/make_doc.py 输入.md   输出.docx      # Markdown → Word
+  python ops/make_doc.py 输入.html 输出.pdf       # HTML → PDF
+  python ops/make_doc.py 模板.docx 模板.html      # Word 模板 → HTML（读结构、照着填）
+  python ops/make_doc.py 输入.docx 输出.txt       # Word → 纯文本（读用户发来的 Word）
+  python ops/make_doc.py 图.png    输出.png       # 复制一张图（如飞书文档里下载的图），放进 outbox 就作为图片消息发出
+  python ops/make_doc.py 画的.svg  输出.png       # SVG（自己画的示意图、图表）→ PNG
 
-Markdown 里的 ![说明](spaces/me/...png) 会把图片嵌进 Word / PDF（路径从运行副本根目录算起）。
-输出路径只能在 spaces/me/ 下（成品放 outbox/<任务号>/）。只用标准库，兼容 /usr/bin/python3（3.9）。
+Markdown 里的 ![说明](spaces/me/...png) 会把图片嵌进 Word / PDF（路径从项目文件夹根目录算起）。
+输入只能是项目文件夹里的文件，输出只能在 spaces/me/ 下（成品放 outbox/<任务号>/）。只用标准库。
 """
 
 from __future__ import annotations
@@ -30,12 +30,12 @@ TARGETS = {".docx": "docx:MS Word 2007 XML", ".pdf": "pdf", ".html": "html:XHTML
            ".txt": "txt:Text (encoded):UTF8", ".xlsx": "xlsx", ".pptx": "pptx", ".png": "png", ".jpg": "jpg"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 MAX_IMG_WIDTH = 560  # 嵌进 Word / PDF 的图最宽多少像素（大约一页宽）
-CSS = ("body{font-family:'Noto Sans CJK SC','Noto Serif CJK SC','Microsoft YaHei',sans-serif;font-size:11pt;line-height:1.6}"
+CSS = ("body{font-family:'Microsoft YaHei','SimSun','Noto Sans CJK SC',sans-serif;font-size:11pt;line-height:1.6}"
        "table{border-collapse:collapse}td,th{border:1px solid #999;padding:4px 8px}h1{font-size:18pt}")
 
 
 # 无界面模式下 LibreOffice 用自带的 fontconfig 找字体，默认只看得到它自带的西文字体，中文转 PDF 会变方框；
-# 每次转换给它一份配置，指向系统字体目录（Linux 的中文字体来自 apt 装的 fonts-noto-cjk）。
+# 每次转换给它一份配置，指向系统字体目录（Mac、Linux 用；Windows 不用）。
 FONTS_CONF = """<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
 <fontconfig><dir>/usr/share/fonts</dir><dir>/usr/local/share/fonts</dir><cachedir>{cache}</cachedir></fontconfig>
@@ -43,10 +43,11 @@ FONTS_CONF = """<?xml version="1.0"?>
 
 
 def find_soffice() -> str:
-    for c in (shutil.which("soffice"), "/usr/bin/soffice", "/usr/lib/libreoffice/program/soffice"):
+    for c in (shutil.which("soffice"), r"C:\Program Files\LibreOffice\program\soffice.exe",
+              r"C:\Program Files (x86)\LibreOffice\program\soffice.exe", "/usr/bin/soffice"):
         if c and Path(c).exists():
             return c
-    sys.exit("没装 LibreOffice（soffice），无法转换。请让用户运行：sudo apt install libreoffice-writer fonts-noto-cjk")
+    sys.exit("没装 LibreOffice（soffice），无法转换。请让用户在 PowerShell 里运行：winget install TheDocumentFoundation.LibreOffice")
 
 
 def image_size(path: Path) -> tuple[int, int] | None:
@@ -71,7 +72,7 @@ def image_size(path: Path) -> tuple[int, int] | None:
 
 
 def local_image(src: str) -> Path | None:
-    """图片路径（从运行副本根目录算起、绝对路径或 file://）→ 运行副本里存在的文件；不是就返回 None。"""
+    """图片路径（从项目文件夹根目录算起、绝对路径或 file://）→ 项目文件夹里存在的文件；不是就返回 None。"""
     src = html.unescape(src)
     if src.startswith("file://"):
         src = urllib.parse.unquote(src[len("file://"):])
@@ -193,11 +194,15 @@ def convert(src: Path, dst: Path) -> None:
                 shutil.copy(work, dst)
                 return
         profile = Path(tmp) / "profile"  # 独立配置目录，几个任务同时转换也不互相锁住
-        cmd = [find_soffice(), f"-env:UserInstallation=file://{profile}", "--headless",
+        cmd = [find_soffice(), f"-env:UserInstallation={profile.as_uri()}", "--headless",
                "--convert-to", fmt, "--outdir", tmp, str(work)]
-        conf = Path(tmp) / "fonts.conf"
-        conf.write_text(FONTS_CONF.format(cache=Path(tmp) / "fccache"))
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env={**os.environ, "FONTCONFIG_FILE": str(conf)})
+        env = dict(os.environ)
+        if os.name != "nt":  # Windows 上 LibreOffice 直接用系统字体（微软雅黑等），不用 fontconfig
+            conf = Path(tmp) / "fonts.conf"
+            conf.write_text(FONTS_CONF.format(cache=Path(tmp) / "fccache"), encoding="utf-8")
+            env["FONTCONFIG_FILE"] = str(conf)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=180, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         produced = Path(tmp) / (work.stem + "." + fmt.split(":")[0])
         if r.returncode != 0 or not produced.exists():
             sys.exit(f"转换失败：{(r.stderr or r.stdout).strip()[-300:]}")
@@ -212,6 +217,9 @@ def main(argv: list[str]) -> int:
     src, dst = Path(argv[0]).resolve(), Path(argv[1]).resolve()
     if not src.is_file():
         sys.exit(f"找不到输入文件：{argv[0]}")
+    # Windows 版 Agent 和你用同一个账号：只许转换项目文件夹里的文件，免得用它读到 .agentos 里的钥匙
+    if not src.is_relative_to(ROOT.resolve()):
+        sys.exit("输入只能是项目文件夹里的文件（spaces/me/ 下的原文、收件箱、草稿等）")
     if not dst.is_relative_to((ROOT / "spaces/me").resolve()):
         sys.exit("输出只能写在 spaces/me/ 下（成品放 spaces/me/outbox/<任务号>/）")
     convert(src, dst)

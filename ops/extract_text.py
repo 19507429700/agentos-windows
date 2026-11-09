@@ -5,17 +5,17 @@
 做法：在 raw/ 下每个这类文件旁边写一个「原文件名 + .txt」（如 01.png.txt、课件.pdf.txt），
 开头写明原文件和所在文档，后面是提取出来的文字。原文件不动，raw/ 依旧只追加。
 
-- 图片（png/jpg/gif/webp/bmp/tif）：tesseract 识字（简体、繁体、英文）
-- PDF：poppler 的 pdftotext 取文字层；某页字很少（扫描版）就用 pdftoppm 把这一页渲染成图片再识字，取字多的
+Windows 上：
+- 图片（png/jpg/gif/webp/bmp/tif）：Windows 自带的识字功能（Windows.Media.Ocr，中文版 Windows 自带中文），见 ops/windows/ocr.ps1
+- PDF：pypdf 取文字层；某页字很少（扫描版）就用 Windows 自带的 PDF 功能把这一页画成图片再识字，取字多的
 - Word（.docx）、PPT（.pptx）：直接读文件里的文字；.doc / .rtf 用 LibreOffice 转成文字
-这些工具 bootstrap-linux.sh 已经用 apt 装好（tesseract-ocr、tesseract-ocr-chi-sim、poppler-utils、libreoffice）。
-（Mac 版用的是 macOS 自带的 Vision 和 PDFKit，识字更快更准；对外的结果格式两边一样。）
-每轮最多跑 DEFAULT_BUDGET_SEC 秒，做不完的下一轮接着做（systemd 定时器每 10 分钟）。
+（Linux 上用 tesseract、poppler；Mac 版用 macOS 自带的 Vision 和 PDFKit。对外的结果格式都一样。）
+每轮最多跑 DEFAULT_BUDGET_SEC 秒，做不完的下一轮接着做（任务计划程序每 10 分钟）。
 
-用法（以你本人账号跑，只用标准库，兼容 /usr/bin/python3）：
-  python3 ops/extract_text.py            # 做一轮
-  python3 ops/extract_text.py --status   # 只统计：还有多少没做
-配置（环境变量）：AGENTOS_RAW 原文根目录（默认运行副本的 raw/）
+用法：
+  python ops/extract_text.py            # 做一轮
+  python ops/extract_text.py --status   # 只统计：还有多少没做
+配置（环境变量）：AGENTOS_RAW 原文根目录（默认是项目文件夹下的 spaces/me/raw）
 状态：~/.agentos/extract_text.json（每个文件做过没有、结果如何，用来跳过和重试）
 """
 
@@ -34,6 +34,11 @@ from html import unescape
 from pathlib import Path
 
 STATE_DIR = Path(os.environ.get("AGENTOS_STATE_DIR", Path.home() / ".agentos"))
+IS_WIN = os.name == "nt"
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+OCR_PS1 = Path(__file__).resolve().parent / "windows" / "ocr.ps1"
+CJK_GAP = re.compile(r"(?<=[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef])[ \t]+(?=[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef])")
+CJK_PUNCT_GAP = re.compile(r"[ \t]+(?=[\u3000-\u303f\uff00-\uffef])|(?<=[\u3000-\u303f\uff00-\uffef])[ \t]+")
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"}  # tesseract 读不了 heic
 PDF_EXTS = {".pdf"}
@@ -55,7 +60,7 @@ SIDECAR_SUFFIX = ".txt"
 
 
 def raw_dir() -> Path:
-    return Path(os.environ.get("AGENTOS_RAW", "/home/agentos/agentos/spaces/me/raw"))
+    return Path(os.environ.get("AGENTOS_RAW", "") or Path(__file__).resolve().parent.parent / "spaces" / "me" / "raw")
 
 
 def state_path() -> Path:
@@ -64,7 +69,7 @@ def state_path() -> Path:
 
 def load_state() -> dict:
     try:
-        st = json.loads(state_path().read_text())
+        st = json.loads(state_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         st = {}
     st.setdefault("files", {})  # 相对 raw/ 的路径 -> {"sig": [大小, 修改时间], "status": ok|empty|fail, "at", "error"}
@@ -90,7 +95,7 @@ def sidecar(p: Path) -> Path:
 
 
 def rel_from_root(p: Path, base: Path) -> str:
-    """出处写法：从运行副本根目录算起（spaces/me/raw/…），和其他原文一致。"""
+    """出处写法：从项目文件夹根目录算起（spaces/me/raw/…），和其他原文一致。"""
     if base.parent.parent.name == "spaces":
         return p.relative_to(base.parents[2]).as_posix()
     return str(p)
@@ -184,7 +189,7 @@ def read_pptx(p: Path) -> list[tuple[int, str]]:
 
 
 def _run(cmd: list[str], timeout: int = OCR_TIMEOUT_SEC) -> str:
-    r = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    r = subprocess.run(cmd, capture_output=True, timeout=timeout, creationflags=NO_WINDOW)
     if r.returncode != 0:
         err = (r.stderr or b"").decode("utf-8", "replace").strip()
         raise RuntimeError(f"{Path(cmd[0]).name} 失败：{err[:300] or r.returncode}")
@@ -194,7 +199,12 @@ def _run(cmd: list[str], timeout: int = OCR_TIMEOUT_SEC) -> str:
 def read_office_text(p: Path) -> str:
     """.doc / .rtf：LibreOffice 转成纯文字。用临时的配置目录，免得和 Agent 出文件时抢同一个。"""
     with tempfile.TemporaryDirectory() as tmp:
-        _run(["soffice", f"-env:UserInstallation=file://{tmp}/profile", "--headless",
+        try:
+            from make_doc import find_soffice
+            soffice = find_soffice()
+        except SystemExit as e:  # 没装 LibreOffice
+            raise RuntimeError(str(e)) from None
+        _run([soffice, f"-env:UserInstallation={(Path(tmp) / 'profile').as_uri()}", "--headless",
               "--convert-to", "txt:Text (encoded):UTF8", "--outdir", tmp, str(p)], timeout=180)
         out = Path(tmp) / (p.stem + ".txt")
         if not out.exists():
@@ -231,10 +241,8 @@ def pdf_pages(p: Path) -> tuple[list[dict], int]:
     return pages, total
 
 
-def ocr_extract(paths: list[Path]) -> dict[str, dict]:
-    """图片识字、PDF 取文字。返回 {路径: 结果}，格式和 Mac 版 extract_text.js 一样：
-    图片 {"ok", "kind": "ocr", "text"}；PDF {"ok", "kind": "pdf", "pages": [{"n", "how", "text"}], "total"}；
-    失败 {"ok": False, "error"}。"""
+def _ocr_tesseract(paths: list[Path]) -> dict[str, dict]:
+    """Linux：tesseract 识字、poppler 读 PDF。"""
     out = {}
     for p in paths:
         try:
@@ -246,6 +254,85 @@ def ocr_extract(paths: list[Path]) -> dict[str, dict]:
         except (RuntimeError, subprocess.TimeoutExpired, OSError, ValueError) as e:
             out[str(p)] = {"path": str(p), "ok": False, "error": f"{type(e).__name__}: {e}"}
     return out
+
+
+# ---------- Windows：自带的识字（ocr.ps1）+ pypdf ----------
+
+def win_ocr(request: dict, timeout: int = 600) -> dict:
+    """调 ocr.ps1。请求、结果都走 UTF-8 的 JSON 临时文件，避开中文 Windows 命令行的编码问题。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        req, res = Path(tmp) / "in.json", Path(tmp) / "out.json"
+        req.write_text(json.dumps(request, ensure_ascii=False), encoding="utf-8")
+        _run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(OCR_PS1),
+              "-In", str(req), "-Out", str(res)], timeout=timeout)
+        d = json.loads(res.read_text(encoding="utf-8-sig"))
+    items = d.get("items") or []
+    d["items"] = [items] if isinstance(items, dict) else items  # PowerShell 只有一项时可能不是数组
+    return d
+
+
+def tidy_cjk(text: str) -> str:
+    """Windows 识字会在每个汉字之间加空格（「报 价 单 ： 3」）：去掉汉字之间、中文标点前后的空格。"""
+    return CJK_PUNCT_GAP.sub("", CJK_GAP.sub("", text or ""))
+
+
+def pdf_text_layers(p: Path) -> tuple[list[str], int]:
+    """每页的文字层（最多 MAX_PDF_PAGES 页）和总页数。"""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        raise RuntimeError("没装 pypdf（安装脚本会装；手动装：python -m pip install pypdf）") from None
+    reader = PdfReader(str(p))
+    out = []
+    for page in reader.pages[:MAX_PDF_PAGES]:
+        try:
+            out.append((page.extract_text() or "").strip())
+        except Exception:  # noqa: BLE001 — 个别页解析出错，当成没有文字层，交给识字
+            out.append("")
+    return out, len(reader.pages)
+
+
+def _ocr_windows(paths: list[Path], ocr=None) -> dict[str, dict]:
+    ocr = ocr or win_ocr
+    out: dict[str, dict] = {}
+    images = [p for p in paths if p.suffix.lower() not in PDF_EXTS]
+    if images:
+        try:
+            got = {i.get("path"): i for i in ocr({"images": [str(p) for p in images]})["items"]}
+        except (RuntimeError, subprocess.TimeoutExpired, OSError, ValueError) as e:
+            got = {str(p): {"ok": False, "error": f"{type(e).__name__}: {e}"} for p in images}
+        for p in images:
+            i = got.get(str(p)) or {"ok": False, "error": "没有返回结果"}
+            out[str(p)] = ({"path": str(p), "ok": True, "kind": "ocr", "text": tidy_cjk(i.get("text", ""))}
+                           if i.get("ok") else {"path": str(p), "ok": False, "error": i.get("error", "")})
+    for p in paths:
+        if p.suffix.lower() not in PDF_EXTS:
+            continue
+        try:
+            layers, total = pdf_text_layers(p)
+            short = [n for n, t in enumerate(layers, 1) if _count(t) < MIN_PAGE_TEXT]
+            ocrd = {}
+            if short:
+                d = ocr({"pdf": str(p), "pages": short})
+                ocrd = {i["page"]: tidy_cjk(i.get("text", "")) for i in d["items"] if i.get("ok")}
+            pages = []
+            for n, layer in enumerate(layers, 1):
+                o = ocrd.get(n, "")
+                pages.append({"n": n, "how": "ocr", "text": o} if _count(o) > _count(layer)
+                             else {"n": n, "how": "text", "text": layer})
+            out[str(p)] = {"path": str(p), "ok": True, "kind": "pdf", "pages": pages, "total": total}
+        except (RuntimeError, subprocess.TimeoutExpired, OSError, ValueError) as e:
+            out[str(p)] = {"path": str(p), "ok": False, "error": f"{type(e).__name__}: {e}"}
+        except Exception as e:  # noqa: BLE001 — pypdf 读坏文件会抛各种异常
+            out[str(p)] = {"path": str(p), "ok": False, "error": f"PDF 读不了：{type(e).__name__}: {e}"}
+    return out
+
+
+def ocr_extract(paths: list[Path]) -> dict[str, dict]:
+    """图片识字、PDF 取文字。返回 {路径: 结果}：
+    图片 {"ok", "kind": "ocr", "text"}；PDF {"ok", "kind": "pdf", "pages": [{"n", "how", "text"}], "total"}；
+    失败 {"ok": False, "error"}。"""
+    return _ocr_windows(paths) if IS_WIN else _ocr_tesseract(paths)
 
 
 # ---------- 写 .txt ----------
@@ -262,7 +349,7 @@ def write_sidecar(p: Path, base: Path, how: str, body: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
-        os.chmod(tmp, 0o644)  # Claude（agentos 账号）要能读
+        os.chmod(tmp, 0o644)  # Agent 要能读
         os.replace(tmp, out)
     except BaseException:
         os.unlink(tmp)
@@ -272,8 +359,8 @@ def write_sidecar(p: Path, base: Path, how: str, body: str) -> None:
 def pdf_body(d: dict) -> tuple[str, str]:
     pages = d.get("pages") or []
     hows = {pg["how"] for pg in pages if pg.get("text", "").strip()}
-    how = {frozenset({"text"}): "PDF 文字层", frozenset({"ocr"}): "PDF 扫描页识字（tesseract）"}.get(
-        frozenset(hows), "PDF 文字层 + 扫描页识字（tesseract）")
+    how = {frozenset({"text"}): "PDF 文字层", frozenset({"ocr"}): "PDF 扫描页识字"}.get(
+        frozenset(hows), "PDF 文字层 + 扫描页识字")
     parts = [f"## 第 {pg['n']} 页\n\n{pg['text'].strip()}" for pg in pages if pg.get("text", "").strip()]
     try:
         total = int(d.get("total", len(pages)))
@@ -329,7 +416,7 @@ def process(base: Path, st: dict, budget_sec: float = DEFAULT_BUDGET_SEC, osa=oc
                 if not d or not d.get("ok"):
                     record(b, "fail", (d or {}).get("error", "没有返回结果"))
                 else:
-                    finish(b, "图片识字（tesseract）", d.get("text", ""), "img")
+                    finish(b, "图片识字（Windows 自带）" if IS_WIN else "图片识字（tesseract）", d.get("text", ""), "img")
             save_state(st)
             continue
         i += 1

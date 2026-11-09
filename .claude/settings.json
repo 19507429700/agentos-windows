@@ -6,19 +6,38 @@
       "Write",
       "WebSearch",
       "WebFetch",
-      "Bash(rg *)",
-      "Bash(python3 ops/search.py *)",
-      "Bash(python3 ops/make_doc.py *)",
-      "Bash(soffice --headless *)"
+      "Bash(python ops/search.py *)",
+      "Bash(python ops/make_doc.py *)"
     ],
     "deny": [
-      "Read(./.env)",
-      "Read(~/.env)",
+      "Read(~/.agentos/**)",
+      "Edit(~/.agentos/**)",
+      "Write(~/.agentos/**)",
+      "Read(~/.claude.json)",
+      "Read(~/.claude/**)",
+      "Read(~/.codebuddy/**)",
+      "Read(~/.git-credentials)",
+      "Read(~/.gitconfig)",
+      "Read(~/.ssh/**)",
+      "Edit(./ops/**)",
+      "Write(./ops/**)",
+      "Edit(./CLAUDE.md)",
+      "Write(./CLAUDE.md)",
+      "Edit(./CODEBUDDY.md)",
+      "Write(./CODEBUDDY.md)",
+      "Edit(./.claude/**)",
+      "Write(./.claude/**)",
+      "Edit(./.codebuddy/**)",
+      "Write(./.codebuddy/**)",
+      "Edit(./.git/**)",
+      "Write(./.git/**)",
       "Bash(curl *)",
       "Bash(wget *)",
       "Bash(ssh *)",
-      "Bash(sudo *)",
-      "Bash(git push *)"
+      "Bash(git *)",
+      "Bash(powershell *)",
+      "Bash(pwsh *)",
+      "Bash(cmd *)"
     ]
   }
 }

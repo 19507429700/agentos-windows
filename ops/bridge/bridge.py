@@ -1,7 +1,8 @@
-"""AgentOS 桥接服务 v1：飞书长连接 → SQLite 队列 → Claude Code（agentos 用户）→ 回推飞书。
+"""AgentOS 桥接服务（Windows 版）：飞书长连接 → SQLite 队列 → Agent（ops/run_agent.py）→ 回推飞书。
 
-以你自己的 macOS 账号运行（launchd 托管），独占飞书凭据；Claude 经 sudo 以 agentos 用户运行，
-读不到这里的任何凭据。配置见 ~/.agentos/bridge.env。
+由任务计划程序在你登录 Windows 后启动（AgentOS-Bridge），独占飞书凭据。
+Windows 版没有单独的 agentos 账号：Agent 和你用同一个账号，靠权限规则（.claude/settings.json）
+禁止它读 %USERPROFILE%\\.agentos 里的钥匙。配置见 %USERPROFILE%\\.agentos\\bridge.env。
 """
 
 from __future__ import annotations
@@ -20,7 +21,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import outbox  # noqa: E402
+from agentos_env import NO_WINDOW, REPO, kill_tree, python  # noqa: E402
 
 log = logging.getLogger("bridge")
 
@@ -68,7 +71,7 @@ def load_env(path: Path) -> None:
     """把 KEY=VALUE 文件读进 os.environ（已存在的环境变量优先）。"""
     if not path.exists():
         return
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -95,11 +98,10 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        runtime = os.environ.get("AGENTOS_RUNTIME", "/home/agentos/agentos")
+        runtime = os.environ.get("AGENTOS_RUNTIME", "") or str(REPO)
         agent_user = os.environ.get("AGENT_USER", "agentos")
-        override = os.environ.get("AGENTOS_CLAUDE_CMD")  # 仅测试用：绕过 sudo 直接跑某个命令
-        cmd = shlex.split(override) if override else [
-            "sudo", "-n", "-H", "-u", agent_user, f"{runtime}/ops/run-claude.sh"]
+        override = os.environ.get("AGENTOS_CLAUDE_CMD")  # 仅测试用：直接跑某个假命令代替 Agent
+        cmd = shlex.split(override) if override else [python(), str(Path(runtime) / "ops" / "run_agent.py")]
         return cls(
             app_id=os.environ.get("FEISHU_APP_ID", ""),
             app_secret=os.environ.get("FEISHU_APP_SECRET", ""),
@@ -266,8 +268,10 @@ def run_agent(cfg: Config, prompt: str, session_id: str | None,
     """跑一轮 claude -p（stream-json），边读边记最后一步；超时先提醒，再强杀。
     on_start(proc) 拿到进程句柄，供「停止」命令中止。"""
     sid_arg = session_id if session_id and SESSION_ID_RE.match(session_id) else "-"
+    # 指定 UTF-8：中文 Windows 默认按 GBK 解码，Agent 输出的中文会乱码；不弹黑窗口
     proc = subprocess.Popen(cfg.claude_cmd + [sid_arg], stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            encoding="utf-8", errors="replace", creationflags=NO_WINDOW)
     if on_start:
         on_start(proc)
     with proc:  # 退出时关闭管道，常驻服务不能泄漏文件句柄
@@ -275,12 +279,8 @@ def run_agent(cfg: Config, prompt: str, session_id: str | None,
 
 
 def stop_process(proc: subprocess.Popen) -> None:
-    """sudo 会把 SIGTERM 转给 agentos 下的 claude；10 秒不退就强杀。"""
-    proc.terminate()
-    try:
-        proc.wait(10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    """连同 Agent 启动的子进程一起结束（Windows 上只结束外层，里面的 Agent 会一直挂着）。"""
+    kill_tree(proc)
 
 
 def _drive(cfg: Config, proc: subprocess.Popen, prompt: str, on_stuck) -> AgentResult:
@@ -747,7 +747,18 @@ def extract_text(msg_type: str, content: str) -> str | None:
 
 # ---------- 入口 ----------
 
+def _log_to_file() -> None:
+    """任务计划程序用 pythonw 启动（不弹黑窗口），它没有屏幕输出：把输出都写进 logs/bridge.log。"""
+    if sys.stdout is not None and sys.stdout.isatty():
+        return  # 你在终端里手动运行时，照常打在屏幕上
+    logs = STATE_DIR / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    f = open(logs / "bridge.log", "a", encoding="utf-8", buffering=1)  # 常驻服务一直写，不关闭
+    sys.stdout = sys.stderr = f
+
+
 def main() -> None:
+    _log_to_file()
     logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     load_env(ENV_FILE)

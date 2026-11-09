@@ -7,13 +7,13 @@ description: 网上调研：用户说「查一下某公司 / 某人 / 某行业�
 
 ## 步骤
 1. 弄清要回答的问题和用途（见客户前了解对方？选供应商？做课程对标？）。问题太宽就先确认范围，一次最多问 2 个问题。
-2. 先看本地：`python3 ops/search.py <关键词>`，用户的原文和知识库里可能已经有线索。
+2. 先看本地：`python ops/search.py <关键词>`，用户的原文和知识库里可能已经有线索。
 3. WebSearch 多换几个说法搜；挑可信来源用 WebFetch 读原文（官网、年报、正规媒体、行业报告优先，自媒体次之）。
 4. 交叉核对：关键数字至少两个来源；来源打架就都列出来并说明。
 5. 输出：
    - 短（手机一屏能看完）：直接回复。
    - 长：Markdown 写到草稿目录 `spaces/me/outbox/草稿/<任务号>/调研.md`，转 Word 放进成品目录
-     `python3 ops/make_doc.py spaces/me/outbox/草稿/<任务号>/调研.md spaces/me/outbox/<任务号>/调研-<主题>-<日期>.docx`；
+     `python ops/make_doc.py spaces/me/outbox/草稿/<任务号>/调研.md spaces/me/outbox/<任务号>/调研-<主题>-<日期>.docx`；
      回复里写 3–5 条要点并说「完整报告已发到飞书」。（`outbox/<任务号>/` 里每个文件都会发给用户，中间稿别放那里。）
 6. 和用户正在跟的人或项目有关的结论，追加进对应的 `kb/people/`、`kb/projects/` 页面（带日期和链接）。
 

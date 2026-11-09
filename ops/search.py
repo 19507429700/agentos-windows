@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """全文检索：在采集原文（raw/）和知识库（kb/）里找关键词，返回「文件:行号: 原文」作为出处。
 
-Agent 用法（以 agentos 身份，在运行副本根目录）：
-  python3 ops/search.py 张总 合同
-  python3 ops/search.py 定金 --source mail --since 2026-10-27
-  python3 ops/search.py 展会 --limit 50
+Agent 用法（以 agentos 身份，在项目文件夹根目录）：
+  python ops/search.py 张总 合同
+  python ops/search.py 定金 --source mail --since 2026-10-27
+  python ops/search.py 展会 --limit 50
 
 多个词之间是「且」。索引是 SQLite FTS5（trigram，中文不用分词），每次查询前自动增量更新。
-只用标准库，兼容 macOS 自带的 /usr/bin/python3（3.9）。
+只用标准库。
 """
 
 from __future__ import annotations

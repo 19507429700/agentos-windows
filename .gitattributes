@@ -1,0 +1,2 @@
+# PowerShell 脚本保持原样（带 BOM、Windows 换行），Windows 自带的 PowerShell 才能正确读中文
+*.ps1 -text

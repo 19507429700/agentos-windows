@@ -44,7 +44,7 @@ def state_path() -> Path:
 
 def load_state() -> dict:
     try:
-        st = json.loads(state_path().read_text())
+        st = json.loads(state_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         st = {}
     for k in ("chats", "p2p", "names"):
@@ -197,7 +197,7 @@ def discover_p2p(st: dict, initial_days: int, http=fu.http_json, now: float | No
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    raw_dir = Path(os.environ.get("AGENTOS_RAW", "/home/agentos/agentos/spaces/me/raw"))
+    raw_dir = Path(os.environ.get("AGENTOS_RAW", "") or Path(__file__).resolve().parent.parent / "spaces" / "me" / "raw")
     initial_days = int(os.environ.get("FEISHU_INITIAL_DAYS", "30"))
     st = load_state()
     try:
@@ -293,7 +293,7 @@ def refresh_my_docs(st: dict, http=fu.http_json, now: float | None = None) -> st
 
 
 class ImageSaver:
-    """把文档里的图片下载到 <文件名>-图片/ 下，返回放在原位置的 ![图N](路径)。路径从运行副本根目录算起。"""
+    """把文档里的图片下载到 <文件名>-图片/ 下，返回放在原位置的 ![图N](路径)。路径从项目文件夹根目录算起。"""
 
     def __init__(self, img_dir: Path, raw_dir: Path, http, fetch):
         self.img_dir, self.http, self.fetch = img_dir, http, fetch
@@ -329,7 +329,7 @@ class ImageSaver:
 def _granted_scope() -> str:
     """当前授权里开了哪些权限（重新授权后会变）。"""
     try:
-        return " ".join(sorted(json.loads(fu.token_file().read_text()).get("scope", "").split()))
+        return " ".join(sorted(json.loads(fu.token_file().read_text(encoding="utf-8")).get("scope", "").split()))
     except (OSError, ValueError):
         return ""
 
@@ -388,7 +388,7 @@ def _read_one(kind: str, obj_token: str, token: str, title: str, d: dict, st: di
     pics = f"；图片 {saver.saved} 张，在同名「-图片」文件夹里" if saver.saved else ""
     path.write_text(f"# {title}\n\n- 飞书{KIND_NAME[kind]}：{token}（版本 {rev}，"
                     f"{datetime.fromtimestamp(now):%Y-%m-%d %H:%M} 读取{pics}）\n\n---\n\n{body}\n", "utf-8")
-    d.update(rev=rev, fmt=DOC_FMT, saved=str(path.relative_to(raw_dir)), img_failed=saver.failed)
+    d.update(rev=rev, fmt=DOC_FMT, saved=path.relative_to(raw_dir).as_posix(), img_failed=saver.failed)
     return saver.saved
 
 
@@ -482,9 +482,9 @@ def collect_minutes(st: dict, raw_dir: Path, http=fu.http_json, fetch=fu.http_te
         path = raw_dir / "feishu" / day / f"妙记-{token[-6:]}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"# 妙记 {token}\n\n- 文字记录，{datetime.fromtimestamp(now):%Y-%m-%d %H:%M} 读取；"
-                        f"链接最早出现在 spaces/me/raw/{src.relative_to(raw_dir)}\n\n---\n\n{text.strip()}\n", "utf-8")
+                        f"链接最早出现在 spaces/me/raw/{src.relative_to(raw_dir).as_posix()}\n\n---\n\n{text.strip()}\n", "utf-8")
         m.pop("error", None)
-        m["saved"] = str(path.relative_to(raw_dir))
+        m["saved"] = path.relative_to(raw_dir).as_posix()
         saved += 1
     return f"新存 {saved} 篇，读不了 {skipped} 篇，共发现 {len(mins)} 个链接"
 

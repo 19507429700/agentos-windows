@@ -13,17 +13,17 @@ description: 合同与方案出件：用户说「出一份合同 / 方案 / 报�
 ## 出一份新合同 / 方案
 中间稿一律放 `spaces/me/outbox/草稿/<任务号>/`；只有给用户的成品放 `spaces/me/outbox/<任务号>/`（那里的每个文件都会发给他）。
 
-1. 把模板转成 HTML 看清结构：`python3 ops/make_doc.py <模板.docx> spaces/me/outbox/草稿/<任务号>/模板.html`
-2. 从原文找条款依据：`python3 ops/search.py <对方> <关键词>`（金额、定金比例、交付时间、违约、付款方式……），读上下文。
+1. 把模板转成 HTML 看清结构：`python ops/make_doc.py <模板.docx> spaces/me/outbox/草稿/<任务号>/模板.html`
+2. 从原文找条款依据：`python ops/search.py <对方> <关键词>`（金额、定金比例、交付时间、违约、付款方式……），读上下文。
 3. 照模板结构填写，写成新的 HTML（保留模板的标题层级和条款顺序）：
    - 原文里有的条款：照原文写，记下出处。
    - 原文里没有、必须用户定的：写成 **【待确认：……】**，不要自己编数字。
    新 HTML 写到 `spaces/me/outbox/草稿/<任务号>/成稿.html`。
-4. 转 Word：`python3 ops/make_doc.py spaces/me/outbox/草稿/<任务号>/成稿.html spaces/me/outbox/<任务号>/<名称>.docx`；用户要 PDF 再转一份 .pdf 到同一个成品目录。
+4. 转 Word：`python ops/make_doc.py spaces/me/outbox/草稿/<任务号>/成稿.html spaces/me/outbox/<任务号>/<名称>.docx`；用户要 PDF 再转一份 .pdf 到同一个成品目录。
 5. 回复：一句话说明出了什么；列出「条款 → 出处」；列出所有【待确认】项。
 
 ## 标注对方改过的合同
-1. 两份都转成纯文本：`python3 ops/make_doc.py <文件.docx> spaces/me/outbox/草稿/<任务号>/原版.txt`（另一份同理）
+1. 两份都转成纯文本：`python ops/make_doc.py <文件.docx> spaces/me/outbox/草稿/<任务号>/原版.txt`（另一份同理）
 2. 逐条对比：改了哪几处、原来是什么、现在是什么。
 3. 逐条判断对用户是否不利，说明理由（金额、期限、责任、违约、付款节点）。
 4. 用户要修订版就按他的意思出一版 Word。

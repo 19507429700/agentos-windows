@@ -14,3 +14,7 @@ __pycache__/
 
 # 检索索引，可随时重建
 spaces/*/.index/
+
+# CodeBuddy 用的规则、权限、技能：每次运行时从 CLAUDE.md、.claude/ 复制过去，不进 Git
+CODEBUDDY.md
+.codebuddy/

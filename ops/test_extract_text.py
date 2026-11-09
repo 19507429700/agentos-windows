@@ -56,7 +56,7 @@ class ExtractTextTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
-        self.raw = root / "spaces/me/raw"   # 和运行副本一样的层级，出处才会写成 spaces/me/raw/…
+        self.raw = root / "spaces/me/raw"   # 和项目文件夹一样的层级，出处才会写成 spaces/me/raw/…
         self.st = {"files": {}}
         et.STATE_DIR = root / "state"
         doc = self.raw / "feishu/2026-11-06/文档-报价单-abc123.md"
@@ -206,6 +206,55 @@ class LinuxBackendTest(unittest.TestCase):
         self.assertIn("接收设备", r[str(ok)]["text"])
         self.assertFalse(r[str(bad)]["ok"])
         self.assertIn("读不了", r[str(bad)]["error"])
+
+
+class WindowsBackendTest(unittest.TestCase):
+    """Windows 版：自带识字（ocr.ps1）和 pypdf 用假结果代替。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.requests = []
+        self._layers = et.pdf_text_layers
+
+    def tearDown(self):
+        et.pdf_text_layers = self._layers
+        self.tmp.cleanup()
+
+    def fake_ocr(self, req):
+        self.requests.append(req)
+        if "images" in req:
+            return {"items": [{"path": p, "ok": "bad" not in p, "text": "报 价 单 ： 3 万 元 Total 30,000",
+                               "error": "读不了"} for p in req["images"]]}
+        return {"total": 3, "items": [{"page": n, "ok": True, "text": f"第 {n} 页 的 题 目 信 源 信 宿"}
+                                      for n in req["pages"]]}
+
+    def test_tidy_cjk(self):
+        self.assertEqual(et.tidy_cjk("报 价 单 ： 3 万 元 Total 30,000"), "报价单：3 万元 Total 30,000")
+
+    def test_images(self):
+        ok, bad = self.dir / "ok.png", self.dir / "bad.png"
+        r = et._ocr_windows([ok, bad], ocr=self.fake_ocr)
+        self.assertEqual(len(self.requests), 1)                      # 一批图只调一次
+        self.assertEqual(r[str(ok)]["text"], "报价单：3 万元 Total 30,000")
+        self.assertFalse(r[str(bad)]["ok"])
+
+    def test_pdf_only_short_pages_ocr(self):
+        et.pdf_text_layers = lambda p: (["正文" * 150, "湖南大学 习题集 1", ""], 3)
+        pdf = self.dir / "a.pdf"
+        r = et._ocr_windows([pdf], ocr=self.fake_ocr)[str(pdf)]
+        self.assertEqual(self.requests, [{"pdf": str(pdf), "pages": [2, 3]}])   # 文字多的第 1 页不识
+        self.assertEqual([(pg["n"], pg["how"]) for pg in r["pages"]], [(1, "text"), (2, "ocr"), (3, "ocr")])
+        self.assertEqual(r["pages"][2]["text"], "第 3 页的题目信源信宿")
+        self.assertEqual(r["total"], 3)
+
+    def test_ocr_failure_marks_all_images_failed(self):
+        def broken(req):
+            raise RuntimeError("powershell.exe 失败：没有可用的识字语言包")
+        a = self.dir / "a.png"
+        r = et._ocr_windows([a], ocr=broken)
+        self.assertFalse(r[str(a)]["ok"])
+        self.assertIn("识字语言包", r[str(a)]["error"])
 
 
 if __name__ == "__main__":

@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import tempfile
@@ -17,7 +16,14 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
+
+try:  # 文件锁：Mac、Linux 用 fcntl，Windows 用 msvcrt
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+    import msvcrt
 
 STATE_DIR = Path(os.environ.get("AGENTOS_STATE_DIR", Path.home() / ".agentos"))
 AUTHORIZE_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
@@ -58,7 +64,7 @@ def token_file() -> Path:
 def load_env(path: Path) -> None:
     if not path.exists():
         return
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             k, v = line.split("=", 1)
@@ -132,15 +138,35 @@ def exchange_code(code: str, http=http_json, now: float | None = None) -> dict:
     return _save(_check(resp, "换取授权凭证"), time.time() if now is None else now)
 
 
+@contextmanager
+def _locked(path: Path):
+    """独占锁：同一时间只有一个进程能续期（refresh_token 只能用一次）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+") as f:
+        if fcntl:
+            fcntl.flock(f, fcntl.LOCK_EX)
+        else:
+            f.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)  # 锁不上会自己重试 10 秒，再不行抛错
+                    break
+                except OSError:
+                    time.sleep(1)
+        try:
+            yield
+        finally:
+            if not fcntl:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+
+
 def access_token(http=http_json, now: float | None = None) -> str:
     """返回可用的 user_access_token，快过期时自动续期。"""
     now = time.time() if now is None else now
-    lock_path = token_file().with_suffix(".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(lock_path, "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with _locked(token_file().with_suffix(".lock")):
         try:
-            tok = json.loads(token_file().read_text())
+            tok = json.loads(token_file().read_text(encoding="utf-8"))
         except (OSError, ValueError):
             raise FeishuError("还没有以你本人身份授权，先运行 ops/feishu_auth.py") from None
         if now < tok["expires_at"] - REFRESH_AHEAD_SEC:

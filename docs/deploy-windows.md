@@ -168,7 +168,17 @@ powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 - 建好 `C:\Users\你的用户名\.agentos`，里面有三个空白配置：`bridge.env`（飞书）、`mail.env`（邮箱）、`agent.env`（底座）；
 - 建一个专用的 Python 环境，装好飞书 SDK 和读 PDF 的工具；
 - 设置 Python 默认用 UTF-8、插电不睡眠；
-- 钥匙都还没填，所以定时任务大部分会显示「跳过」，**这是正常的**。
+- 装定时任务。
+
+**第一次跑完，看到这些都是正常的：**
+- `用 py -3.12 建专用环境`（或别的版本）：它会自动挑一个能用的 Python，坏掉的会跳过；
+- 好几行「**跳过……**」：钥匙都还没填，后面每填好一种就再运行一次本脚本，会自动补装；
+- `✅ AgentOS-extract-text`：提取文字的任务，不用钥匙，第一次就装上了；
+- `✅ AgentOS-push-kb`：第二步设了自己的备份仓库才会有；没设就是「跳过知识库备份」；
+- `⚠️ 底座 claude 还没装`：第四步才装，正常；
+- `Git 的 bash：……\bin\bash.exe`：找到了 Git，Claude Code 要用它。如果是「⚠️ 没找到 Git 自带的 bash.exe」，按它的提示处理，或者把这一行发给我。
+
+只要**没有红色的报错**，就可以往下走。
 
 装完**关掉 PowerShell 再重新打开**，然后 `cd $HOME\AgentOS`。
 

@@ -251,5 +251,41 @@ class GitBashTest(unittest.TestCase):
             self.assertEqual(run_agent.find_git_bash(str(shims)), str(real / "bin" / "bash.exe"))
 
 
+class DeepCheckTest(unittest.TestCase):
+    """check_agent --deep 的判断：能读能搜、钥匙读不到才算通过；读到钥匙一定判失败。"""
+
+    def run_with(self, answers):
+        import io
+        from contextlib import redirect_stdout
+        import check_agent
+        old = check_agent.ask
+        check_agent.ask = lambda prompt, timeout=300: (
+            {"type": "result", "is_error": False, "result": next(a for k, a in answers if k in prompt)}, "")
+        try:
+            with redirect_stdout(io.StringIO()) as out:
+                code = check_agent.deep_checks()
+        finally:
+            check_agent.ask = old
+        return code, out.getvalue()
+
+    def test_all_pass(self):
+        code, out = self.run_with([("profile.md", "# 个人画像"), ("search.py", "spaces/me/kb/profile.md:1: # 个人画像"),
+                                   ("bridge.env", "读不了")])
+        self.assertEqual(code, 0)
+        self.assertIn("全部通过", out)
+
+    def test_key_leak_fails(self):
+        code, out = self.run_with([("profile.md", "# 个人画像"), ("search.py", "spaces/me/kb/profile.md:1: x"),
+                                   ("bridge.env", "FEISHU_APP_ID")])
+        self.assertEqual(code, 1)
+        self.assertIn("钥匙不安全", out)
+
+    def test_tools_unusable_fails(self):
+        code, out = self.run_with([("profile.md", "我没有权限读文件"), ("search.py", "运行不了：权限不足"),
+                                   ("bridge.env", "读不了")])
+        self.assertEqual(code, 1)
+        self.assertIn("2 项没通过", out)
+
+
 if __name__ == "__main__":
     unittest.main()

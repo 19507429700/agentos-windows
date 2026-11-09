@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 模板：ops/install-collectors.sh 替换 __HOME__ / __REPO__ 后装到 ~/Library/LaunchAgents/ -->
+<!-- 微信公众号文章自动抓取归档：pending 链接 -> fetch_wx.py 抓正文 -> 收件夹 -> ingest 归档 -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.agentos.fetch-wechat-articles</string>
+  <key>ProgramArguments</key>
+  <!-- 经 run-job.sh 启动：失败/超时告警到飞书和微信，成功去 healthchecks 打卡 -->
+  <!-- 抓取脚本用专用 Python（wxfetch-python，带 requests+bs4），由 install-collectors.sh 建在 ~/.agentos/ -->
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO__/ops/run-job.sh</string>
+    <string>fetch-wechat-articles</string>
+    <string>30</string>
+    <string>--</string>
+    <string>/usr/bin/python3</string>
+    <string>__REPO__/ops/fetch_wechat_articles.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>WECHAT_FETCH_PYTHON</key>
+    <string>__HOME__/.agentos/wxfetch-python/bin/python</string>
+  </dict>
+  <!-- 每 10 分钟增量抓取（和微信聊天采集一致）；没有新链接时什么都不抓；Mac 睡眠错过的，醒来后补跑一次 -->
+  <key>StartInterval</key>
+  <integer>600</integer>
+  <key>StandardOutPath</key>
+  <string>__HOME__/.agentos/logs/fetch-wechat-articles.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.agentos/logs/fetch-wechat-articles.log</string>
+</dict>
+</plist>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 模板：ops/install-collectors.sh 替换 __HOME__ / __REPO__ 后装到 ~/Library/LaunchAgents/ -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.agentos.collect-feishu</string>
+  <key>ProgramArguments</key>
+  <!-- 经 run-job.sh 启动：失败/超时告警到飞书和微信，成功去 healthchecks 打卡 -->
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO__/ops/run-job.sh</string>
+    <string>collect-feishu</string>
+    <string>8</string>
+    <string>--</string>
+    <string>/usr/bin/python3</string>
+    <string>__REPO__/ops/collect_feishu.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+  <!-- 每 10 分钟增量采集（和邮箱一致）；Mac 睡眠错过的，醒来后补跑一次 -->
+  <key>StartInterval</key>
+  <integer>600</integer>
+  <key>StandardOutPath</key>
+  <string>__HOME__/.agentos/logs/collect-feishu.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.agentos/logs/collect-feishu.log</string>
+</dict>
+</plist>

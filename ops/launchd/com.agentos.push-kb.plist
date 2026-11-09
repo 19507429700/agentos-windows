@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 模板：ops/install-collectors.sh 替换 __HOME__ / __REPO__ 后装到 ~/Library/LaunchAgents/ -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.agentos.push-kb</string>
+  <key>ProgramArguments</key>
+  <!-- 经 run-job.sh 启动：失败/超时告警到飞书和微信，成功去 healthchecks 打卡 -->
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO__/ops/run-job.sh</string>
+    <string>push-kb</string>
+    <string>15</string>
+    <string>--</string>
+    <string>/bin/bash</string>
+    <string>__REPO__/ops/push-kb.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <!-- 每天 03:00 把知识库 kb/ 备份到 GitHub；Mac 睡着错过的，醒来后补跑 -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__HOME__/.agentos/logs/push-kb.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.agentos/logs/push-kb.log</string>
+</dict>
+</plist>

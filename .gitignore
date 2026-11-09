@@ -1,0 +1,16 @@
+# 采集原文和待发件只留在本机，不进远程仓库
+spaces/*/raw/
+spaces/*/outbox/
+
+# 所有凭据
+.env
+.env.*
+*.env
+
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+
+# 检索索引，可随时重建
+spaces/*/.index/

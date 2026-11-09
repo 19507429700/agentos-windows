@@ -342,7 +342,7 @@ powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 看日志，出现 `connected to wss://` 就是连上飞书了（按 `Ctrl + C` 退出查看）：
 
 ```powershell
-Get-Content $HOME\.agentos\logs\bridge.log -Tail 20 -Wait
+Get-Content $HOME\.agentos\logs\bridge.log -Tail 20 -Wait -Encoding UTF8
 ```
 
 ---
@@ -489,6 +489,7 @@ py ops\push_kb.py
 ## 日常和排错
 
 - **日志**都在 `C:\Users\你的用户名\.agentos\logs\`：`bridge.log`（机器人）、`collect-mail.log`、`daily-review.log` 等。
+  用 PowerShell 看日志要加 `-Encoding UTF8`，不然中文是乱码，比如 `Get-Content $HOME\.agentos\logs\bridge.log -Tail 50 -Encoding UTF8`；用记事本打开也可以。
 - **机器人没反应**：先看 `bridge.log` 最后几行；再跑 `py ops\check_agent.py` 看底座通不通。
 - **重启机器人**（改了代码、拉了更新之后）：
 

@@ -231,7 +231,15 @@ Set-Content $HOME\.agentos\proxy "http://127.0.0.1:7890"
 winget install -e --id OpenJS.NodeJS.LTS
 ```
 
-关掉 PowerShell 重新打开，`cd $HOME\AgentOS`，然后：
+关掉 PowerShell 重新打开，`cd $HOME\AgentOS`。
+
+**先允许运行脚本（只需要做一次）。** Windows 默认禁止运行脚本，不改的话，下面的 `npm` 会报「**无法加载文件 ……npm.ps1，因为在此系统上禁止运行脚本**」：
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+（问你是否更改时输入 `Y` 回车；没问就是已经改好了。）然后设国内镜像、装 Claude Code：
 
 ```powershell
 npm config set registry https://registry.npmmirror.com
@@ -240,6 +248,14 @@ npm config set registry https://registry.npmmirror.com
 ```powershell
 npm install -g @anthropic-ai/claude-code
 ```
+
+装完检查（能显示版本号就装好了）：
+
+```powershell
+claude --version
+```
+
+> 中间出现几行黄色的 `npm warn install-scripts`，是警告不是错误，`claude --version` 能显示版本号就不用管。
 
 填接口地址、模型名、密钥（地址和模型名**以厂商文档为准**，DeepSeek 看文档里「Anthropic API」那一页）：
 
@@ -265,7 +281,8 @@ py ops\set_key.py agent ANTHROPIC_AUTH_TOKEN
 irm https://www.codebuddy.cn/cli/install.ps1 | iex
 ```
 
-（装不上的话，按 B 的办法装好 Node.js、设好国内镜像，然后 `npm install -g @tencent-ai/codebuddy-code`。）
+（装不上的话，按 B 的办法装好 Node.js、允许运行脚本、设好国内镜像，然后 `npm install -g @tencent-ai/codebuddy-code`。）
+（报「禁止运行脚本」：先运行 B 里的 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`。）
 
 关掉 PowerShell 重新打开，`cd $HOME\AgentOS`，然后：
 

@@ -1,7 +1,8 @@
 # AgentOS 部署指南：Windows
 
-写于 2026-11-09。这是 Windows 版的第一份安装说明，**还没有在真的 Windows 电脑上完整跑过**。
-标「⚠️ 要实测」的地方，是在 Mac 上没法验证的。哪一步卡住了，把屏幕上的报错原样记下来（见最后的「测试记录」）。
+写于 2026-11-09。第一到十二步 2026-11-09 已在一台真的 Windows 电脑上从头跑通；
+第十三、十四步（微信聊天、公众号文章）2026-11-10 新加：读库的代码在 Mac 的真实微信库上对照验证过，**取钥匙那一步要在 Windows 上实测**。
+哪一步卡住了，把屏幕上的报错原样记下来（见最后的「测试记录」）。
 
 ---
 
@@ -14,14 +15,14 @@
   - **B. Claude Code + 其他公司的接口**（DeepSeek 等）：国内直连，不用代理，按用量付费；
   - **C. WorkBuddy**（腾讯的 CodeBuddy Code）：国内直连。
 - 定时任务（采集、复盘、备份）和飞书机器人，都放在 Windows 自带的「**任务计划程序**」里，开机登录后自动在后台运行，不弹窗口。
-- **这一版没有的**：微信聊天采集、公众号文章抓取（Windows 版微信的读取方法和 Mac 不同，还没做）。
+- **微信聊天、公众号文章是可选的**（第十三、十四步）：只读你自己电脑上的微信聊天记录，不发消息。不需要的话做完第十二步就够了。
 
 **大概要多久**：第一次装 1.5～2.5 小时。其中装软件 20 分钟，飞书后台点权限 30～60 分钟。
 
 ### 和 Mac 版在安全上的一个区别（要知道）
 
 Mac 版专门建了一个 agentos 账号给 AI 用，AI **在系统层面**就读不到你的钥匙。Windows 上这样做太麻烦，所以这一版 **AI 和你用同一个 Windows 账号**，靠下面几道限制护住钥匙：
-- 钥匙都放在 `C:\Users\你的用户名\.agentos`，**权限规则禁止 AI 读这个文件夹**，也禁止它读 Claude、CodeBuddy、Git 的登录信息；
+- 钥匙都放在 `C:\Users\你的用户名\.agentos`，**权限规则禁止 AI 读这个文件夹**，也禁止它读 Claude、CodeBuddy、Git 的登录信息，以及微信的钥匙（`.wechat-cli`）和微信的数据文件夹；
 - AI 能运行的命令只有「搜索」和「出文件」两个，出文件只能读项目文件夹里的文件；
 - AI 不能改代码、不能改自己的规则；
 - 对外发邮件，照样要你在飞书卡片上点「发送」。
@@ -467,7 +468,7 @@ py ops\set_key.py bridge PUSHPLUS_TOKEN
 py ops\set_key.py healthchecks HC_COLLECT_MAIL https://hc-ping.com/这里换成你的地址
 ```
 
-（同样填 `HC_COLLECT_FEISHU`、`HC_DAILY_REVIEW`、`HC_PUSH_KB`。）
+（同样填 `HC_COLLECT_FEISHU`、`HC_DAILY_REVIEW`、`HC_PUSH_KB`；做了第十三步的，再填 `HC_COLLECT_WECHAT`、`HC_FETCH_WECHAT_ARTICLES`。）
 
 ---
 
@@ -489,6 +490,122 @@ py ops\daily_review.py
 ```powershell
 py ops\push_kb.py
 ```
+
+---
+
+## 第十三步（可选）：微信聊天记录
+
+做完这一步，AI 能读你微信里的私聊和你选的几个群：每 10 分钟把新消息存进 `spaces\me\raw\wechat\`，问它「今天微信里谁找我了」能带出处回答，每晚的复盘也会算上微信。
+
+**先知道这几件事：**
+- **只读不发**：只读这台电脑上已经同步下来的聊天记录，不发消息、不改微信的任何东西。读不到手机上有、电脑上没同步的历史。
+- **个人自用**：读的是你自己电脑上、你自己的微信。
+- **同一个微信同一时间一般只能在一台电脑上登录**：如果你的 Mac 也在采这个微信，Windows 上登录后 Mac 的微信会被挤下线，Mac 那边就采不到了。先想好以后让哪台电脑负责读微信。
+- 微信要 **4.0 以上**（「设置 → 关于微信」看版本号），电脑上**登录着**。
+- 微信**退出登录、或者更新版本**之后，钥匙可能失效，要重新取一次（13.2）。
+
+### 13.1 拉更新
+
+在项目文件夹里：
+
+```powershell
+git pull upstream main
+```
+
+### 13.2 取微信的钥匙
+
+微信的聊天库是加密的，要先从正在运行的微信里取出钥匙，存成一个文件。AgentOS 自己不取钥匙，用你在 WorkBuddy 里用过的 **wechat-cli 技能**来取（取法见那个技能的说明，核心就是微信开着、登录着，运行一次 `wechat-cli init`）。
+
+**之前在 WorkBuddy 里跑通过的，先看钥匙文件是不是已经有了：**
+
+```powershell
+Test-Path $HOME\.wechat-cli\all_keys.json
+```
+
+- 显示 `True`：已经有了，直接做 13.3。
+- 显示 `False`：照 wechat-cli 技能的说明做一次 `init`，成功后会显示「密钥: ~/.wechat-cli/all_keys.json」，再回来做 13.3。
+
+> ⚠️ **不要自己 `pip install wechat-cli`。** 2026-11-10 查过 PyPI 上现在叫这个名字的包（0.1.0 到 0.2.5 所有版本），是另一个工具：它会另外下载一份微信、往微信里注入代码，还能发消息，和 WorkBuddy 技能里说的不是一个东西。用技能里的那套。
+>
+> 微信 **4.1.12 以上**的版本，标准的 `init` 可能取不到钥匙（「0 命中」），要走技能说明里另外那条路（`dump_config_blobs.py` + `gen_keys.py`）。
+
+钥匙文件不在默认位置的，告诉 AgentOS 它在哪（把路径换成你的）：
+
+```powershell
+py ops\set_key.py wechat WECHAT_KEYS "C:\你的路径\all_keys.json"
+```
+
+### 13.3 重新运行一次安装脚本
+
+它会装读微信库要用的几个包，检查能不能读出来，能读就装好两个定时任务（采微信、抓公众号文章）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
+```
+
+看「检查微信……」下面几行：
+- `✅ 读得出来：N 个会话（私聊 N 个，群 N 个）`，后面有 `✅ AgentOS-collect-wechat` 和 `✅ AgentOS-fetch-wechat-articles`：成功了。
+- `没找到微信的数据文件夹`：找到你的微信文件夹（「设置 → 文件管理」里能看到，一般是 `文档\xwechat_files`），把里面 `wxid_开头的文件夹\db_storage` 的完整路径告诉 AgentOS，再重跑安装脚本：
+
+```powershell
+py ops\set_key.py wechat WECHAT_DB_ROOT "C:\Users\你的用户名\Documents\xwechat_files\wxid_xxx\db_storage"
+```
+
+- `钥匙都对不上`：钥匙是别的账号的，或者微信退出登录、更新过。回 13.2 重新取。
+
+### 13.4 选要采的群
+
+私聊默认全采；群**只采你点名的**（群太多，全采会很乱）。先看看有哪些群：
+
+```powershell
+py ops\collect_wechat.py --groups
+```
+
+把要采的群名填进去，多个用逗号隔开；填群名里的一部分也行：
+
+```powershell
+py ops\set_key.py wechat WECHAT_GROUPS "第一个群名,第二个群名"
+```
+
+再检查一次，看「命中的群」是不是你要的那几个：
+
+```powershell
+py ops\collect_wechat.py --check
+```
+
+不用重跑安装脚本，下一次采集就按新名单来。
+
+### 13.5 手动采一次
+
+```powershell
+py ops\collect_wechat.py
+```
+
+最后一行是 `微信采集完成：新存 N 条，涉及 N 个会话`。第一次每个会话往回采 3 天，以后只采新的。到 `spaces\me\raw\wechat\` 里能看到按日期分的文件。
+
+然后在手机飞书里问机器人「今天微信里有谁找我」，回答里应该带 `raw/wechat/…` 的出处。
+
+---
+
+## 第十四步：公众号文章
+
+做了第十三步就已经装好了，不用另外装东西。聊天里（私聊和你选的群）出现的公众号文章，每 10 分钟抓一次正文，存进 `spaces\me\raw\wechat\articles\`，文章里的图片也下载下来。之后问「我存过哪些公众号文章」「总结一下那篇讲 XX 的文章」，AI 能读全文。
+
+**验收**：在微信里给自己（文件传输助手）或者任何一个会被采的聊天发一篇公众号文章，等十分钟左右（采到聊天之后才会抓），或者手动跑：
+
+```powershell
+py ops\collect_wechat.py
+```
+
+```powershell
+py ops\fetch_wechat_articles.py
+```
+
+最后一行是 `抓取完成：成功 N，失败 N`。到 `spaces\me\raw\wechat\articles\` 里看有没有这篇文章。
+
+- 只想看看有哪些文章等着抓、不真抓：`py ops\fetch_wechat_articles.py --dry-run`
+- **抓失败**：多半是公众号平台临时拦了，下一轮会自动重试；一直失败的话把日志 `$HOME\.agentos\logs\fetch-wechat-articles.log` 最后几行发给我。
+- 文章被删了、下架了：记成「失效」，以后不再抓，不算失败。
 
 ---
 
@@ -516,6 +633,7 @@ py ops\deploy.py
   如果更新里加了新的定时任务，再运行一次安装脚本。
 - **电脑重启后**：要**登录一次 Windows**，机器人和定时任务才会开始跑。
 - **钥匙失效**（机器人突然不回、复盘写不出来）：回第四步重新填，再跑 `check_agent.py`。
+- **微信突然采不到了**（日志 `collect-wechat.log` 里说钥匙对不上）：微信退出登录或更新过，回第十三步 13.2 重新取钥匙，再跑 `py ops\collect_wechat.py --check`。
 - **知识库**（`spaces\me\kb\`）是 AI 写的，要改就在飞书里让它改，自己改容易和备份冲突。
 
 ---
@@ -533,3 +651,5 @@ py ops\deploy.py
 - 第九步 飞书授权：
 - 第十步 用的哪个邮箱、任务计划程序里的 AgentOS- 任务：
 - 第十二步 出 Word 中文正常、截图里的字能搜到、复盘、备份：
+- 第十三步 微信版本号、钥匙文件有没有、`--check` 的结果、采到几条：
+- 第十四步 公众号文章抓到没有：

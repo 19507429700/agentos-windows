@@ -2,11 +2,11 @@
 #   powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 # 可以重复运行：每次都会补上还没装的部分（哪一项的钥匙填好了，就装哪一项的定时任务），不会弄坏已有的。
 # 做的事：
-#   1. 建 %USERPROFILE%\.agentos（钥匙、日志、Python 环境），生成空白配置：bridge.env、mail.env、agent.env
-#   2. 建专用 Python 环境（venv），装飞书 SDK（lark-oapi）和读 PDF 的 pypdf
+#   1. 建 %USERPROFILE%\.agentos（钥匙、日志、Python 环境），生成空白配置：bridge.env、mail.env、agent.env、wechat.env
+#   2. 建专用 Python 环境（venv），装飞书 SDK（lark-oapi）、读 PDF 的 pypdf、读微信库和抓公众号文章用的几个包
 #   3. 让 Python 默认用 UTF-8（中文 Windows 默认 GBK，读写中文文件会乱码）
 #   4. 插电时不睡眠
-#   5. 在「任务计划程序」里装定时任务：飞书机器人（登录后常驻）、采集邮件和飞书、提取文字（每 10 分钟）、
+#   5. 在「任务计划程序」里装定时任务：飞书机器人（登录后常驻）、采集邮件、飞书、微信，抓公众号文章，提取文字（每 10 分钟）、
 #      每日复盘（23:00）、知识库备份（03:00）。电脑关着错过了，开机后补跑。
 $ErrorActionPreference = "Stop"
 
@@ -78,6 +78,15 @@ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 CODEBUDDY_API_KEY=
 CODEBUDDY_INTERNET_ENVIRONMENT=internal
 "@
+Write-Template (Join-Path $State "wechat.env") @"
+# 微信聊天采集（教程第十三步）。都可以不填，用默认值。
+# 钥匙文件：默认 %USERPROFILE%\.wechat-cli\all_keys.json（WorkBuddy 的 wechat-cli 技能 init 后放在这里）
+WECHAT_KEYS=
+# 采哪些群：填群名里的关键词，逗号分隔；私聊一律全采。留空只采私聊
+WECHAT_GROUPS=
+# 第一次采集每个会话往回看几天
+WECHAT_INITIAL_DAYS=3
+"@
 
 # ---------- 2. Python 环境 ----------
 Say "==> 2/5 Python 环境"
@@ -106,7 +115,7 @@ if (-not (Test-Path $Py)) {
     if (-not (Test-Path $Py)) { throw "建 Python 环境失败（$Venv）" }
 }
 & $Py -m pip install -q --disable-pip-version-check --upgrade pip
-& $Py -m pip install -q --disable-pip-version-check -r (Join-Path $Repo "ops\bridge\requirements.txt") pypdf
+& $Py -m pip install -q --disable-pip-version-check -r (Join-Path $Repo "ops\bridge\requirements.txt") pypdf cryptography zstandard requests beautifulsoup4
 if ($LASTEXITCODE -ne 0) { throw "装 Python 包失败。国内网络慢的话，先运行：$Py -m pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple ，再重跑本脚本。" }
 Say "    $Py"
 
@@ -180,6 +189,22 @@ if (Has-Value $mailEnv "MAIL_PASSWORD") {
 if (Test-Path (Join-Path $State "feishu_user_token.json")) {
     Install-Job "collect-feishu" 8 (Every10) @($py, "`"$ops\collect_feishu.py`"")
 } else { Say "    跳过飞书采集：还没以你本人身份授权（先运行 py ops\feishu_auth.py）" }
+
+# 微信：有了钥匙文件（第十三步取的）、并且检查能读出会话，才装采集和公众号抓取
+$wechatEnv = Join-Path $State "wechat.env"
+$wxKeys = ""
+if (Test-Path $wechatEnv) {
+    $wxKeys = ((Get-Content $wechatEnv -Encoding UTF8 | Where-Object { $_ -match "^\s*WECHAT_KEYS\s*=" }) -replace "^\s*WECHAT_KEYS\s*=\s*", "").Trim().Trim('"')
+}
+if (-not $wxKeys) { $wxKeys = Join-Path $env:USERPROFILE ".wechat-cli\all_keys.json" }
+if (Test-Path $wxKeys) {
+    Say "    检查微信……"
+    & $Py -X utf8 (Join-Path $ops "collect_wechat.py") --check
+    if ($LASTEXITCODE -eq 0) {
+        Install-Job "collect-wechat" 8 (Every10) @($py, "`"$ops\collect_wechat.py`"")
+        Install-Job "fetch-wechat-articles" 15 (Every10) @($py, "`"$ops\fetch_wechat_articles.py`"")
+    } else { Say "    ⚠️ 微信库读不出来（看上面的原因），微信采集这次没装" }
+} else { Say "    跳过微信采集：还没取微信钥匙（教程第十三步）" }
 
 Install-Job "extract-text" 8 (Every10) @($py, "`"$ops\extract_text.py`"")
 

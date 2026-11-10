@@ -1,7 +1,7 @@
 """往配置文件里填一项，不用记事本：
   python ops/set_key.py <配置> <名字>          粘贴值后回车（屏幕上不显示，适合令牌、密码）
   python ops/set_key.py <配置> <名字> <值>     直接写（适合不保密的，比如 agent AGENT_ENGINE codebuddy）
-<配置> 是 bridge、mail、agent、healthchecks 之一，对应 %USERPROFILE%\\.agentos\\<配置>.env；
+<配置> 是 bridge、mail、agent、healthchecks、wechat 之一，对应 %USERPROFILE%\\.agentos\\<配置>.env；
 也可以写完整路径。这一行已经有了就替换，没有就加在最后。最后显示「已填好」或「没填上」，不会把值打印出来。
 """
 
@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agentos_env import STATE  # noqa: E402
 
-NAMES = {"bridge", "mail", "agent", "healthchecks"}
+NAMES = {"bridge", "mail", "agent", "healthchecks", "wechat"}
 
 
 def set_key(path: Path, name: str, value: str) -> None:

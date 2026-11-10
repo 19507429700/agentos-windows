@@ -82,7 +82,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"==> {datetime.now():%Y-%m-%d %H:%M:%S} 每日复盘 {day}", flush=True)
     missing = []
-    for script, label in (("collect_mail.py", "邮箱"), ("collect_feishu.py", "飞书")):
+    # 微信没取钥匙时 collect_wechat.py 安静退出 0，不算「没采到」
+    for script, label in (("collect_mail.py", "邮箱"), ("collect_feishu.py", "飞书"), ("collect_wechat.py", "微信")):
         r = run_py(script, timeout=600)
         print((r.stdout + r.stderr).strip(), flush=True)
         if r.returncode != 0:

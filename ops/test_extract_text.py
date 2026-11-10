@@ -159,6 +159,103 @@ class ExtractTextTest(unittest.TestCase):
             db.close()
 
 
+def rels(items: dict) -> str:
+    return "<Relationships>" + "".join(f'<Relationship Id="{k}" Type="x" Target="{v}"/>' for k, v in items.items()) \
+        + "</Relationships>"
+
+
+def make_docx_with_images(p: Path) -> None:
+    """正文里先插 image2 再插 image1；还有一个 emf 矢量图、一个太小的图标、一个页眉里的 logo（没被正文引用）。"""
+    body = ('<w:p><w:r><w:t>合同正文</w:t></w:r></w:p>'
+            '<w:p><w:r><w:drawing><a:blip r:embed="rId9"/></w:drawing></w:r></w:p>'
+            '<w:p><w:r><w:drawing><a:blip r:embed="rId8"/></w:drawing></w:r></w:p>'
+            '<w:p><w:r><w:drawing><a:blip r:embed="rId7"/></w:drawing></w:r></w:p>'
+            '<w:p><w:r><w:drawing><a:blip r:embed="rId6"/></w:drawing></w:r></w:p>')
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr("word/document.xml", f"<w:document><w:body>{body}</w:body></w:document>")
+        z.writestr("word/_rels/document.xml.rels", rels({
+            "rId9": "media/image2.png", "rId8": "media/image1.jpeg", "rId7": "media/image3.emf",
+            "rId6": "media/icon.png", "rId1": "styles.xml"}))
+        z.writestr("word/media/image1.jpeg", PNG)
+        z.writestr("word/media/image2.png", PNG)
+        z.writestr("word/media/image3.emf", PNG)
+        z.writestr("word/media/icon.png", b"tiny")
+        z.writestr("word/media/logo.png", PNG)
+
+
+def make_pptx_with_images(p: Path) -> None:
+    with zipfile.ZipFile(p, "w") as z:
+        for i, (t, rid) in enumerate([("封面", None), ("报价", "rId2")], 1):
+            pic = f'<p:pic><a:blip r:embed="{rid}"/></p:pic>' if rid else ""
+            z.writestr(f"ppt/slides/slide{i}.xml", f"<p:sld><a:p><a:r><a:t>{t}</a:t></a:r></a:p>{pic}</p:sld>")
+            z.writestr(f"ppt/slides/_rels/slide{i}.xml.rels",
+                       rels({"rId1": "../slideLayouts/slideLayout1.xml", **({rid: "../media/image5.png"} if rid else {})}))
+        z.writestr("ppt/media/image5.png", PNG)
+
+
+class DocImagesTest(unittest.TestCase):
+    """Word / PPT 里插的图片也识字，附在正文后面。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.raw = root / "spaces/me/raw"
+        self.files = self.raw / "wechat/files/2026-11-10"
+        self.files.mkdir(parents=True)
+        et.STATE_DIR = root / "state"
+        self.st = {"files": {}}
+        self.seen = []
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def ocr(self, paths):
+        self.seen.append([p.name for p in paths])
+        return {str(p): {"ok": True, "kind": "ocr", "text": f"{p.name} 图里的字"} for p in paths}
+
+    def test_order_skip_vector_and_tiny(self):
+        make_docx_with_images(self.files / "合同.docx")
+        self.assertEqual(et.doc_images(self.files / "合同.docx"),
+                         [("word/media/image2.png", ""), ("word/media/image1.jpeg", ""),
+                          ("word/media/icon.png", ""), ("word/media/logo.png", "")])
+        et.process(self.raw, self.st, budget_sec=60, osa=self.ocr)
+        self.assertEqual(self.seen, [["01.png", "02.jpeg", "04.png"]])  # 03 是太小的图标，不识
+        t = (self.files / "合同.docx.txt").read_text(encoding="utf-8")
+        self.assertIn("Word 正文 + 文中图片识字", t)
+        self.assertIn("识字可能有错字", t)
+        self.assertIn("合同正文\n\n## 文中图片里的字\n\n### 图 1\n\n01.png 图里的字", t)
+        self.assertIn("### 图 4\n\n04.png 图里的字", t)
+
+    def test_pptx_slide_numbers(self):
+        make_pptx_with_images(self.files / "课件.pptx")
+        self.assertEqual(et.doc_images(self.files / "课件.pptx"), [("ppt/media/image5.png", "第 2 页")])
+        et.process(self.raw, self.st, budget_sec=60, osa=self.ocr)
+        t = (self.files / "课件.pptx.txt").read_text(encoding="utf-8")
+        self.assertIn("## 第 2 页\n\n报价", t)
+        self.assertIn("### 图 1（第 2 页）\n\n01.png 图里的字", t)
+
+    def test_ocr_failure_keeps_text(self):
+        make_pptx_with_images(self.files / "课件.pptx")
+
+        def broken(paths):
+            raise RuntimeError("识字工具坏了")
+        et.process(self.raw, self.st, budget_sec=60, osa=broken)
+        t = (self.files / "课件.pptx.txt").read_text(encoding="utf-8")
+        self.assertIn("## 第 2 页\n\n报价", t)  # 识字坏了，文字照样写出来
+        self.assertIn("1 张图片这次没识出来：RuntimeError: 识字工具坏了", t)
+
+    def test_old_records_redone_once(self):
+        make_docx(self.files / "旧.docx", ["老文档"])
+        rel = "wechat/files/2026-11-10/旧.docx"
+        self.st["files"][rel] = {"sig": et.signature(self.files / "旧.docx"), "status": "ok", "at": 0}
+        (self.files / "旧.docx.txt").write_text("旧的", encoding="utf-8")
+        c = et.process(self.raw, self.st, budget_sec=60, osa=self.ocr)
+        self.assertEqual(c["attempted"], 1)                    # 没有 v=2 的旧记录：重做一次
+        self.assertEqual(self.st["files"][rel]["v"], et.ZIP_VERSION)
+        c = et.process(self.raw, self.st, budget_sec=60, osa=self.ocr)
+        self.assertEqual(c["attempted"], 0)                    # 之后不再重做
+
+
 class LinuxBackendTest(unittest.TestCase):
     """Linux 版的识字后端：pdfinfo / pdftotext / pdftoppm / tesseract 用假输出代替。"""
 

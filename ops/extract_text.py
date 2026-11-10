@@ -7,7 +7,7 @@
 Windows 上：
 - 图片（png/jpg/gif/webp/bmp/tif）：Windows 自带的识字功能（Windows.Media.Ocr，中文版 Windows 自带中文），见 ops/windows/ocr.ps1
 - PDF：pypdf 取文字层；某页字很少（扫描版）就用 Windows 自带的 PDF 功能把这一页画成图片再识字，取字多的
-- Word（.docx）、PPT（.pptx）：直接读文件里的文字；.doc / .rtf 用 LibreOffice 转成文字
+- Word（.docx）、PPT（.pptx）：直接读文件里的文字，文里插的图片取出来识字、附在后面；.doc / .rtf 用 LibreOffice 转成文字
 （Linux 上用 tesseract、poppler；Mac 版用 macOS 自带的 Vision 和 PDFKit。对外的结果格式都一样。）
 每轮最多跑 DEFAULT_BUDGET_SEC 秒，做不完的下一轮接着做（任务计划程序每 10 分钟）。
 
@@ -56,6 +56,9 @@ OCR_TIMEOUT_SEC = 120             # 一张图、一页 PDF 最多识多久
 TESS_LANG = "chi_sim+chi_tra+eng"
 MIN_PAGE_TEXT = 200              # PDF 某页文字层少于这么多字，就再识一遍字，取字多的（扫描版常常只有页眉页码是文字）
 MAX_PDF_PAGES = 300
+DOC_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff"}  # Word/PPT 里的 emf、wmf、svg 是矢量图，识不了
+MAX_DOC_IMAGES = 40              # 一个 Word / PPT 最多识多少张图
+ZIP_VERSION = 2                  # 2：Word / PPT 里插的图片也识字。之前按 1 提取过的会自动重做一遍
 RENDER_DPI = 200
 FAIL_RETRY_SEC = 86400           # 失败的一天后再试
 SIDECAR_SUFFIX = ".txt"
@@ -135,7 +138,8 @@ def candidates(base: Path, st: dict, now: float) -> list[Path]:
             if size > MAX_FILE_BYTES or (ext in IMAGE_EXTS and size < MIN_IMAGE_BYTES):
                 continue
             rec = st["files"].get(p.relative_to(base).as_posix())
-            if rec and rec.get("sig") == signature(p):
+            outdated = ext in ZIP_EXTS and rec is not None and rec.get("v", 1) < ZIP_VERSION
+            if rec and rec.get("sig") == signature(p) and not outdated:
                 if rec["status"] == "ok" and sidecar(p).exists():
                     continue
                 if rec["status"] == "empty":
@@ -188,6 +192,104 @@ def read_pptx(p: Path) -> list[tuple[int, str]]:
                     text += "\n（备注）" + nt
             out.append((i, text))
     return out
+
+
+def _zip_target(base_dir: str, target: str) -> str:
+    """关系文件里的 Target（如 media/image1.png、../media/image1.png）换成压缩包里的完整路径。"""
+    parts = base_dir.split("/") if base_dir else []
+    for seg in target.split("/"):
+        if seg == "..":
+            if parts:
+                parts.pop()
+        elif seg and seg != ".":
+            parts.append(seg)
+    return "/".join(parts)
+
+
+def _embedded(z: zipfile.ZipFile, xml_name: str) -> list[str]:
+    """某个 XML（Word 正文、PPT 某一页）里按出现顺序引用的图片，返回压缩包里的路径。"""
+    d, f = xml_name.rsplit("/", 1)
+    rels_name = f"{d}/_rels/{f}.rels"
+    if rels_name not in z.namelist():
+        return []
+    rels = {}
+    for tag in re.findall(r"<Relationship\b[^>]*>", z.read(rels_name).decode("utf-8", "replace")):
+        rid, tgt = re.search(r'\bId="([^"]+)"', tag), re.search(r'\bTarget="([^"]+)"', tag)
+        if rid and tgt and 'TargetMode="External"' not in tag:
+            rels[rid.group(1)] = _zip_target(d, unescape(tgt.group(1)))
+    xml = z.read(xml_name).decode("utf-8", "replace")
+    return [rels[r] for r in re.findall(r'r:(?:embed|id)="([^"]+)"', xml) if r in rels]
+
+
+def doc_images(p: Path) -> list[tuple[str, str]]:
+    """Word / PPT 里插的图片，按出现顺序、去重：[(压缩包里的路径, 位置说明)]。PPT 的位置是「第 N 页」。"""
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def add(name: str, where: str) -> None:
+        if name not in seen and Path(name).suffix.lower() in DOC_IMAGE_EXTS:
+            seen.add(name)
+            out.append((name, where))
+
+    with zipfile.ZipFile(p) as z:
+        names = set(z.namelist())
+        if p.suffix.lower() == ".pptx":
+            slides = sorted((int(m.group(1)), n) for n in names if (m := re.match(r"ppt/slides/slide(\d+)\.xml$", n)))
+            for i, n in slides:
+                for img in _embedded(z, n):
+                    add(img, f"第 {i} 页")
+            media = "ppt/media/"
+        else:
+            for img in _embedded(z, "word/document.xml") if "word/document.xml" in names else []:
+                add(img, "")
+            media = "word/media/"
+        for n in sorted(names):  # 页眉页脚、母版里的图，按文件名排在最后
+            if n.startswith(media):
+                add(n, "")
+    return [(n, w) for n, w in out if n in names]
+
+
+def doc_images_text(p: Path, osa) -> str:
+    """把 Word / PPT 里的图片取出来识字，返回要附在正文后面的一节（没有图、图里没字就返回空）。"""
+    imgs = doc_images(p)
+    if not imgs:
+        return ""
+    with tempfile.TemporaryDirectory() as tmp:
+        files = []
+        with zipfile.ZipFile(p) as z:
+            for k, (name, where) in enumerate(imgs, 1):
+                data = z.read(name)
+                if len(data) < MIN_IMAGE_BYTES:  # 图标、分割线
+                    continue
+                f = Path(tmp) / f"{k:02d}{Path(name).suffix.lower()}"
+                f.write_bytes(data)
+                files.append((f, k, where))
+                if len(files) >= MAX_DOC_IMAGES:
+                    break
+        if not files:
+            return ""
+        try:
+            res = osa([f for f, _, _ in files])
+        except (subprocess.TimeoutExpired, OSError, RuntimeError, ValueError) as e:
+            return f"## 文中图片里的字\n\n（{len(files)} 张图片这次没识出来：{type(e).__name__}: {e}）"
+    parts, failed = [], 0
+    for f, k, where in files:
+        d = res.get(str(f))
+        if not d or not d.get("ok"):
+            failed += 1
+            continue
+        text = (d.get("text") or "").strip()
+        if text:
+            parts.append(f"### 图 {k}" + (f"（{where}）" if where else "") + f"\n\n{text}")
+    if failed:
+        parts.append(f"（另有 {failed} 张图片这次没识出来）")
+    return "## 文中图片里的字\n\n" + "\n\n".join(parts) if parts else ""
+
+
+def _with_images(how: str, body: str, extra: str) -> tuple[str, str]:
+    if not extra:
+        return how, body
+    return how + " + 文中图片识字", (body.strip() + "\n\n" + extra).strip()
 
 
 def _run(cmd: list[str], timeout: int = OCR_TIMEOUT_SEC) -> str:
@@ -382,6 +484,8 @@ def process(base: Path, st: dict, budget_sec: float = DEFAULT_BUDGET_SEC, osa=oc
 
     def record(p: Path, status: str, error: str = "") -> None:
         rec = {"sig": signature(p), "status": status, "at": int(time.time())}
+        if p.suffix.lower() in ZIP_EXTS:
+            rec["v"] = ZIP_VERSION
         if error:
             rec["error"] = error[:300]
         st["files"][p.relative_to(base).as_posix()] = rec
@@ -432,10 +536,10 @@ def process(base: Path, st: dict, budget_sec: float = DEFAULT_BUDGET_SEC, osa=oc
                     how, body = pdf_body(d)
                     finish(p, how, body, "pdf")
             elif ext == ".docx":
-                finish(p, "Word 正文", read_docx(p), "doc")
+                finish(p, *_with_images("Word 正文", read_docx(p), doc_images_text(p, osa)), "doc")
             elif ext == ".pptx":
                 body = "\n\n".join(f"## 第 {n} 页\n\n{t}" for n, t in read_pptx(p) if t.strip())
-                finish(p, "PPT 每页文字", body, "doc")
+                finish(p, *_with_images("PPT 每页文字", body, doc_images_text(p, osa)), "doc")
             else:
                 finish(p, "LibreOffice 转文字", read_office_text(p), "doc")
         except errors as e:

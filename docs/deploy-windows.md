@@ -509,8 +509,10 @@ py ops\push_kb.py
 在项目文件夹里：
 
 ```powershell
-git pull upstream main
+git pull --no-edit upstream main
 ```
+
+`--no-edit` 的意思：你这边有自己的提交（比如每天 03:00 的知识库备份）时，拉更新要把两边合并，git 会自动写好合并说明，不再弹出编辑器。万一还是进了一个满屏 `~` 的编辑器，按 `Esc`，输入 `:wq`，回车就出来了。
 
 ### 13.2 取微信的钥匙
 
@@ -619,7 +621,7 @@ py ops\deploy.py
 - **拉更新**（模板有新版本时）：
 
 ```powershell
-git pull upstream main
+git pull --no-edit upstream main
 ```
 
 ```powershell

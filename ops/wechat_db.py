@@ -12,7 +12,7 @@ Windows 上没有现成的 SQLCipher 库，这里用纯 Python 解密：
 那个文件夹 Agent 的权限规则读不到。
 
 钥匙文件不要求格式：里面所有 64 位十六进制的钥匙都拿来试，用第 1 页的 HMAC 校验，对得上的就是这个库的钥匙。
-需要 cryptography 包（安装脚本会装）。
+AES 解密用 cryptography 包（安装脚本会装）；它加载不了时自动改用 pycryptodome（飞书 SDK 的依赖）。
 """
 
 from __future__ import annotations
@@ -97,17 +97,38 @@ def find_key(first_page: bytes, keys: list[bytes]) -> bytes | None:
 
 # ---------- 解密 ----------
 
-def _decryptor(key: bytes):
+def _aes_cbc():
+    """返回 aes(key, iv, data) -> 明文。先用 cryptography；它加载不了时改用 pycryptodome（飞书 SDK 依赖它，环境里一定有）。
+    两个都不行，把真实原因带出来（Windows 上有时不是没装，而是 DLL 加载失败）。"""
+    errs = []
     try:
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    except ImportError as e:
-        raise WechatDBError("缺少 cryptography 包：重新运行一次安装脚本 ops\\windows\\install.ps1") from e
+
+        def aes(key: bytes, iv: bytes, data: bytes) -> bytes:
+            d = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
+            return d.update(data) + d.finalize()
+        return aes
+    except Exception as e:  # ImportError，或者 Windows 上 DLL 加载失败时的 OSError
+        errs.append(f"cryptography：{type(e).__name__}: {e}")
+    try:
+        from Crypto.Cipher import AES
+
+        def aes(key: bytes, iv: bytes, data: bytes) -> bytes:
+            return AES.new(key, AES.MODE_CBC, iv).decrypt(data)
+        return aes
+    except Exception as e:
+        errs.append(f"pycryptodome：{type(e).__name__}: {e}")
+    raise WechatDBError("解密用的包加载不了（" + "；".join(errs) + "）。重新运行一次安装脚本 ops\\windows\\install.ps1，"
+                        "还不行就把这一行完整发给帮你部署的人")
+
+
+def _decryptor(key: bytes):
+    aes = _aes_cbc()
 
     def dec(page: bytes, pgno: int) -> bytes:
         off = SALT if pgno == 1 else 0
         iv = page[PAGE - RESERVE:PAGE - RESERVE + IV]
-        d = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
-        plain = d.update(page[off:PAGE - RESERVE]) + d.finalize()
+        plain = aes(key, iv, page[off:PAGE - RESERVE])
         return (SQLITE_HEADER if pgno == 1 else b"") + plain + page[PAGE - RESERVE:]
     return dec
 

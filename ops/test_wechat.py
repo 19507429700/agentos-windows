@@ -77,6 +77,28 @@ class PageTest(unittest.TestCase):
         self.assertEqual(w._decryptor(key)(encrypt_page(key, p2, 2, salt), 2)[:w.PAGE - w.RESERVE],
                          p2[:w.PAGE - w.RESERVE])
 
+    def test_fallback_to_pycryptodome(self):
+        # Windows 上实测过：cryptography 明明装着，在安装脚本里却加载失败。这时要自动改用 pycryptodome
+        try:
+            import Crypto.Cipher.AES  # noqa: F401
+        except ImportError:
+            self.skipTest("没装 pycryptodome")
+        from unittest import mock
+        key, salt = os.urandom(32), os.urandom(16)
+        p2 = os.urandom(w.PAGE - w.RESERVE) + b"\0" * w.RESERVE
+        page = encrypt_page(key, p2, 2, salt)
+        with mock.patch.dict(sys.modules, {"cryptography.hazmat.primitives.ciphers": None}):
+            dec = w._decryptor(key)(page, 2)
+        self.assertEqual(dec[:w.PAGE - w.RESERVE], p2[:w.PAGE - w.RESERVE])
+
+    def test_no_aes_backend_shows_real_reason(self):
+        from unittest import mock
+        with mock.patch.dict(sys.modules, {"cryptography.hazmat.primitives.ciphers": None, "Crypto.Cipher": None}):
+            with self.assertRaises(w.WechatDBError) as cm:
+                w._decryptor(os.urandom(32))
+        self.assertIn("cryptography：ModuleNotFoundError", str(cm.exception))
+        self.assertIn("pycryptodome：ModuleNotFoundError", str(cm.exception))
+
     def test_keys_from_file_any_shape(self):
         k1, k2 = os.urandom(32).hex(), os.urandom(32).hex()
         with tempfile.TemporaryDirectory() as d:

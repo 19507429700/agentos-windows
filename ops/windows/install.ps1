@@ -159,7 +159,8 @@ function Every10() {
         -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
     return $t
 }
-$py = "python"   # run_job.py 会把它换成上面那个 Python
+# 别叫 $py：PowerShell 变量不分大小写，会把上面的 $Py（专用环境）盖掉，后面的检查就跑到系统 Python 上去了
+$jobPy = "python"   # run_job.py 会把它换成上面那个 Python
 $ops = Join-Path $Repo "ops"
 
 # 飞书机器人：登录 Windows 后启动，一直开着；崩溃了 1 分钟后自动重启
@@ -182,12 +183,12 @@ $mailEnv = Join-Path $State "mail.env"
 if (Has-Value $mailEnv "MAIL_PASSWORD") {
     Say "    测试邮箱登录……"
     & $Py -X utf8 (Join-Path $ops "collect_mail.py") --check
-    if ($LASTEXITCODE -eq 0) { Install-Job "collect-mail" 8 (Every10) @($py, "`"$ops\collect_mail.py`"") }
+    if ($LASTEXITCODE -eq 0) { Install-Job "collect-mail" 8 (Every10) @($jobPy, "`"$ops\collect_mail.py`"") }
     else { Say "    ⚠️ 邮箱登录失败，先检查 mail.env，邮件采集这次没装" }
 } else { Say "    跳过邮件采集：mail.env 里还没填 MAIL_PASSWORD" }
 
 if (Test-Path (Join-Path $State "feishu_user_token.json")) {
-    Install-Job "collect-feishu" 8 (Every10) @($py, "`"$ops\collect_feishu.py`"")
+    Install-Job "collect-feishu" 8 (Every10) @($jobPy, "`"$ops\collect_feishu.py`"")
 } else { Say "    跳过飞书采集：还没以你本人身份授权（先运行 py ops\feishu_auth.py）" }
 
 # 微信：有了钥匙文件（第十三步取的）、并且检查能读出会话，才装采集和公众号抓取
@@ -201,22 +202,22 @@ if (Test-Path $wxKeys) {
     Say "    检查微信……"
     & $Py -X utf8 (Join-Path $ops "collect_wechat.py") --check
     if ($LASTEXITCODE -eq 0) {
-        Install-Job "collect-wechat" 8 (Every10) @($py, "`"$ops\collect_wechat.py`"")
-        Install-Job "fetch-wechat-articles" 15 (Every10) @($py, "`"$ops\fetch_wechat_articles.py`"")
+        Install-Job "collect-wechat" 8 (Every10) @($jobPy, "`"$ops\collect_wechat.py`"")
+        Install-Job "fetch-wechat-articles" 15 (Every10) @($jobPy, "`"$ops\fetch_wechat_articles.py`"")
     } else { Say "    ⚠️ 微信库读不出来（看上面的原因），微信采集这次没装" }
 } else { Say "    跳过微信采集：还没取微信钥匙（教程第十三步）" }
 
-Install-Job "extract-text" 8 (Every10) @($py, "`"$ops\extract_text.py`"")
+Install-Job "extract-text" 8 (Every10) @($jobPy, "`"$ops\extract_text.py`"")
 
 if (Has-Value $bridgeEnv "OWNER_OPEN_ID") {
-    Install-Job "daily-review" 40 (New-ScheduledTaskTrigger -Daily -At "23:00") @($py, "`"$ops\daily_review.py`"")
+    Install-Job "daily-review" 40 (New-ScheduledTaskTrigger -Daily -At "23:00") @($jobPy, "`"$ops\daily_review.py`"")
 } else { Say "    跳过每日复盘：bridge.env 里还没填 OWNER_OPEN_ID（先绑定本人）" }
 
 # 知识库备份：origin 设成你自己的仓库才装；origin 还是模板仓库时绝不装（免得把知识库推进模板）
 $why = $null
 try { $why = (& $Py -X utf8 (Join-Path $ops "push_kb.py") --check 2>&1) } catch { $why = $_.Exception.Message }
 if ($LASTEXITCODE -eq 0) {
-    Install-Job "push-kb" 15 (New-ScheduledTaskTrigger -Daily -At "03:00") @($py, "`"$ops\push_kb.py`"")
+    Install-Job "push-kb" 15 (New-ScheduledTaskTrigger -Daily -At "03:00") @($jobPy, "`"$ops\push_kb.py`"")
 } else {
     Unregister-ScheduledTask -TaskName "AgentOS-push-kb" -Confirm:$false -ErrorAction SilentlyContinue
     Say "    跳过知识库备份：$why"

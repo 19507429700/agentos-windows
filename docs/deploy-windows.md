@@ -519,7 +519,7 @@ git pull --no-edit upstream main
 微信的聊天库是加密的，先从正在运行的微信里把钥匙取出来，存成一个文件。项目里带了取钥匙的工具，**微信开着、登录着**，用**管理员身份**开一个 PowerShell（开始菜单找到 PowerShell，右键「以管理员身份运行」），进到项目文件夹，运行：
 
 ```powershell
-python .claude\skills\wechat-key\scripts\get_key.py
+py .claude\skills\wechat-key\scripts\get_key.py
 ```
 
 - 看到 `24/24 salts 找到密钥`（数字是你的数据库个数）就成了，钥匙写到了 `%USERPROFILE%\.wechat-cli\all_keys.json`，做 13.3。
@@ -528,7 +528,7 @@ python .claude\skills\wechat-key\scripts\get_key.py
 - `没找到微信数据目录`：把你的 `db_storage` 路径跟在命令后面（「设置 → 文件管理」能看到微信文件夹，一般在 `文档\xwechat_files`）：
 
 ```powershell
-python .claude\skills\wechat-key\scripts\get_key.py "C:\Users\你的用户名\Documents\xwechat_files\wxid_xxx\db_storage"
+py .claude\skills\wechat-key\scripts\get_key.py "C:\Users\你的用户名\Documents\xwechat_files\wxid_xxx\db_storage"
 ```
 
 > 取钥匙要读微信进程的内存，所以这一步要管理员身份、微信开着。取完就不用了：以后读聊天记录不需要管理员、也不需要微信开着。钥匙文件只存在你自己电脑上，别提交进 Git、别发给别人。

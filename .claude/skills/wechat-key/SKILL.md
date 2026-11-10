@@ -16,7 +16,7 @@ description: 给本机 Windows 微信 4.x 提取数据库密钥（微信 4.1+ �
 **前提**：微信 4.x 已安装、已登录、正在运行；终端**以管理员身份**打开。
 
 ```bash
-python .claude/skills/wechat-key/scripts/get_key.py
+py .claude/skills/wechat-key/scripts/get_key.py
 ```
 
 自动定位微信数据目录 → 提取密钥 → 写到 `%USERPROFILE%\.wechat-cli\all_keys.json`。
@@ -30,7 +30,7 @@ python .claude/skills/wechat-key/scripts/get_key.py
 ## 验证
 
 ```bash
-python ops/collect_wechat.py --check
+py ops/collect_wechat.py --check
 ```
 
 能列出会话即说明钥匙对了。之后读消息**不需要微信运行、不需要重复取密钥**。微信大版本更新后密钥可能失效，重跑一次 `get_key.py` 即可。

@@ -32,6 +32,9 @@ from datetime import datetime
 from html import unescape
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import agentos_env  # noqa: E402,F401  用 py 直接运行时自动换到专用环境（读 PDF 要用里面的 pypdf）
+
 STATE_DIR = Path(os.environ.get("AGENTOS_STATE_DIR", Path.home() / ".agentos"))
 IS_WIN = os.name == "nt"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)

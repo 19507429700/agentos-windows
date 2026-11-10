@@ -107,3 +107,43 @@ def kill_tree(proc: subprocess.Popen, wait: float = 10) -> None:
         proc.wait(wait)
     except subprocess.TimeoutExpired:
         proc.kill()
+
+
+# ---------- 自动换到专用环境 ----------
+VENV = STATE / "venv"
+_SWITCHED = "AGENTOS_VENV_SWITCHED"
+
+
+def _same_dir(a: Path, b: Path) -> bool:
+    try:
+        return os.path.normcase(str(a.resolve())) == os.path.normcase(str(b.resolve()))
+    except OSError:
+        return False
+
+
+def _use_venv() -> None:
+    """用 py / python 直接运行 ops 下的脚本时，跑的是电脑上装的那个 Python，没有安装脚本装进专用环境的包
+    （cryptography、zstandard、pypdf、requests 等），会报「缺少某某包」。这里发现不在专用环境里，
+    就用专用环境的 Python 把同一条命令重跑一遍。定时任务和飞书机器人本来就在专用环境里，这段什么也不做。"""
+    if not IS_WIN or os.environ.get(_SWITCHED):
+        return
+    main_file = getattr(sys.modules.get("__main__"), "__file__", None)
+    vpy = VENV / "Scripts" / "python.exe"
+    if not main_file or not vpy.exists() or _same_dir(Path(sys.prefix), VENV):
+        return
+    main_path = Path(main_file).resolve()
+    try:
+        main_path.relative_to(REPO)  # 只管本项目的脚本；别的程序引用这个文件时不动
+    except ValueError:
+        return
+    env = dict(os.environ)
+    env[_SWITCHED] = "1"
+    sys.stdout.flush()
+    try:
+        rc = subprocess.call([str(vpy), "-X", "utf8", str(main_path), *sys.argv[1:]], env=env)
+    except KeyboardInterrupt:  # Ctrl+C：里面那个已经收到了，这里安静退出，不打一大段报错
+        rc = 130
+    sys.exit(rc)
+
+
+_use_venv()

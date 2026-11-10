@@ -287,5 +287,68 @@ class DeepCheckTest(unittest.TestCase):
         self.assertIn("2 项没通过", out)
 
 
+class UseVenvTest(unittest.TestCase):
+    """用 py 直接运行 ops 下的脚本时，要自动换到专用环境（Windows 实测：py ops\\collect_wechat.py 报缺 cryptography）。"""
+
+    def setUp(self):
+        from unittest import mock
+        self.tmp = tempfile.TemporaryDirectory()
+        self.venv = Path(self.tmp.name) / "venv"
+        (self.venv / "Scripts").mkdir(parents=True)
+        (self.venv / "Scripts" / "python.exe").write_text("")
+        self.calls = []
+        self.script = agentos_env.REPO / "ops" / "collect_wechat.py"
+        main = type(sys)("__main__")
+        main.__file__ = str(self.script)
+        env = {k: v for k, v in os.environ.items() if k != agentos_env._SWITCHED}
+        self.patches = [
+            mock.patch.object(agentos_env, "IS_WIN", True),
+            mock.patch.object(agentos_env, "VENV", self.venv),
+            mock.patch.dict(sys.modules, {"__main__": main}),
+            mock.patch.object(sys, "argv", [str(self.script), "--groups"]),
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(agentos_env.subprocess, "call",
+                              lambda cmd, env=None: self.calls.append((cmd, env)) or 3),
+        ]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in reversed(self.patches):
+            p.stop()
+        self.tmp.cleanup()
+
+    def test_system_python_switches_to_venv(self):
+        from unittest import mock
+        with mock.patch.object(sys, "prefix", "C:\\Python312"):
+            with self.assertRaises(SystemExit) as cm:
+                agentos_env._use_venv()
+        self.assertEqual(cm.exception.code, 3)  # 退出码原样带回
+        cmd, env = self.calls[0]
+        self.assertEqual(cmd, [str(self.venv / "Scripts" / "python.exe"), "-X", "utf8",
+                               str(self.script.resolve()), "--groups"])
+        self.assertEqual(env[agentos_env._SWITCHED], "1")  # 防止来回重跑
+
+    def test_already_in_venv_does_nothing(self):
+        from unittest import mock
+        with mock.patch.object(sys, "prefix", str(self.venv)):
+            agentos_env._use_venv()
+        self.assertEqual(self.calls, [])
+
+    def test_no_venv_or_not_our_script_does_nothing(self):
+        from unittest import mock
+        with mock.patch.object(sys, "prefix", "C:\\Python312"):
+            with mock.patch.object(agentos_env, "VENV", Path(self.tmp.name) / "没有这个环境"):
+                agentos_env._use_venv()
+            sys.modules["__main__"].__file__ = str(Path(self.tmp.name) / "别的程序.py")
+            agentos_env._use_venv()
+            del sys.modules["__main__"].__file__  # python -c、python -m unittest 这类
+            agentos_env._use_venv()
+            os.environ[agentos_env._SWITCHED] = "1"
+            sys.modules["__main__"].__file__ = str(self.script)
+            agentos_env._use_venv()
+        self.assertEqual(self.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

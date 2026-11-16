@@ -47,6 +47,8 @@ SCOPES = [
     "sheets:spreadsheet:readonly",        # 读电子表格
     "bitable:app:readonly",               # 读多维表格
     "drive:drive:readonly",               # 列出「我的空间」里的全部文件
+    "docx:document",                      # 写飞书文档：建新文档、往 AgentOS 建的文档里补内容
+    "docs:document.media:upload",         # 写飞书文档：把图片传进文档
 ]
 REFRESH_AHEAD_SEC = 300  # 过期前 5 分钟就续期
 # 飞书是国内服务，直连；urllib 在 macOS 上默认会走系统代理，绕一圈反而容易超时
@@ -185,7 +187,7 @@ def api_get(path: str, params: dict | None = None, http=http_json) -> dict:
 
 
 def api_post(path: str, params: dict | None, body: dict, http=http_json) -> dict:
-    """以你本人身份 POST（只用于查询类接口，如搜索消息），返回 data。"""
+    """以你本人身份 POST（搜索消息等查询接口；写飞书文档也走这里），返回 data。"""
     return _call("POST", path, params, body, http)
 
 

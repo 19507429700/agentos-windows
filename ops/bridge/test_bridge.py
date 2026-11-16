@@ -28,6 +28,10 @@ if prompt == "MAKEFILE" and m:  # 模拟 Agent 产出文件
     os.makedirs(out, exist_ok=True)
     open(os.path.join(out, "合同.docx"), "w").write("doc")
     open(os.path.join(out, "截图.png"), "w").write("png")
+if prompt == "MAKEDOC" and m:  # 模拟 Agent 写一份建飞书文档的请求
+    out = os.path.join(os.environ["FAKE_RUNTIME"], "spaces/me/outbox/feishu-docs", m.group(1))
+    os.makedirs(out, exist_ok=True)
+    open(os.path.join(out, "1.json"), "w").write('{"title": "周会纪要", "markdown": "x.md"}')
 if sid_arg.startswith("deadbeef"):
     print("No conversation found with session ID: " + sid_arg, file=sys.stderr)
     sys.exit(1)
@@ -217,6 +221,29 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(sorted(c[2] for c in self.fs.of("file")), ["合同.docx", "截图.png"])
         kinds = [c[0] for c in self.fs.calls if c[0] in ("md", "file")]
         self.assertEqual(kinds[0], "md")  # 先回文字，再发文件
+
+    def test_doc_requests_written_after_reply(self):
+        import feishu_write
+        seen = []
+
+        def fake_process(path, runtime, reg, folder):
+            seen.append((path.name, folder))
+            if len(seen) == 2:
+                raise feishu_write.DocError("没找到")
+            return "📄 已建好飞书文档《周会纪要》：https://x/docx/1"
+        self.b.cfg.doc_folder = "FOLDER"
+        orig = feishu_write.process
+        feishu_write.process = fake_process
+        try:
+            self.send("MAKEDOC")
+            self.assertTrue(wait_for(lambda: self.fs.of("text")))
+            self.assertEqual(self.fs.of("text")[0][2], "📄 已建好飞书文档《周会纪要》：https://x/docx/1")
+            self.assertEqual(seen, [("1.json", "FOLDER")])
+            self.send("MAKEDOC")  # 同一任务号目录不会重复处理；第二个任务出错要告诉你
+            self.assertTrue(wait_for(lambda: len(self.fs.of("text")) == 2))
+            self.assertIn("飞书文档没写成", self.fs.of("text")[1][2])
+        finally:
+            feishu_write.process = orig
 
     def test_stop_aborts_running_and_clears_queue(self):
         self.send("SLEEP 5")

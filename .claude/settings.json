@@ -20,6 +20,7 @@
       "Read(~/.gitconfig)",
       "Read(~/.ssh/**)",
       "Read(~/.wechat-cli/**)",
+      "Read(~/.iflyrec-assistant/**)",
       "Read(~/.workbuddy/**)",
       "Read(~/Documents/xwechat_files/**)",
       "Read(~/AppData/Roaming/Tencent/**)",

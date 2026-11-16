@@ -22,7 +22,7 @@
 ### 和 Mac 版在安全上的一个区别（要知道）
 
 Mac 版专门建了一个 agentos 账号给 AI 用，AI **在系统层面**就读不到你的钥匙。Windows 上这样做太麻烦，所以这一版 **AI 和你用同一个 Windows 账号**，靠下面几道限制护住钥匙：
-- 钥匙都放在 `C:\Users\你的用户名\.agentos`，**权限规则禁止 AI 读这个文件夹**，也禁止它读 Claude、CodeBuddy、Git 的登录信息，以及微信的钥匙（`.wechat-cli`）和微信的数据文件夹；
+- 钥匙都放在 `C:\Users\你的用户名\.agentos`，**权限规则禁止 AI 读这个文件夹**，也禁止它读 Claude、CodeBuddy、Git 的登录信息，以及微信的钥匙（`.wechat-cli`）和微信的数据文件夹；讯飞录音笔的授权也存在 `.agentos` 里；
 - AI 能运行的命令只有「搜索」和「出文件」两个，出文件只能读项目文件夹里的文件；
 - AI 不能改代码、不能改自己的规则；
 - 对外发邮件，照样要你在飞书卡片上点「发送」。
@@ -381,7 +381,9 @@ powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 ## 第九步：飞书采集（读你的聊天、文档、日程）
 
 开放平台 → 权限管理，开下面这些（**用户身份**）：
-`offline_access`、`im:message:readonly`、`im:message.p2p_msg:get_as_user`、`im:message.group_msg:get_as_user`、`im:chat:readonly`、`search:message`、`contact:user.base:readonly`、`contact:contact.base:readonly`、`docx:document:readonly`、`wiki:wiki:readonly`、`calendar:calendar:readonly`、`minutes:minutes.transcript:export`、`docs:document.media:download`、`sheets:spreadsheet:readonly`、`bitable:app:readonly`、`drive:drive:readonly`
+`offline_access`、`im:message:readonly`、`im:message.p2p_msg:get_as_user`、`im:message.group_msg:get_as_user`、`im:chat:readonly`、`search:message`、`contact:user.base:readonly`、`contact:contact.base:readonly`、`docx:document:readonly`、`wiki:wiki:readonly`、`calendar:calendar:readonly`、`minutes:minutes.transcript:export`、`docs:document.media:download`、`sheets:spreadsheet:readonly`、`bitable:app:readonly`、`drive:drive:readonly`、`docx:document`、`docs:document.media:upload`
+
+最后两项是让机器人能**建飞书文档、往里补内容**（第十六步）；不想用这个功能可以不开，其他功能照常。
 
 安全设置 → 重定向 URL 加：`http://localhost:18080/feishu/callback`。发布新版本，审批通过后授权（会自动打开浏览器，登录、点「授权」）：
 
@@ -500,6 +502,7 @@ py ops\notify.py --test
 | 知识库备份 | `HC_PUSH_KB` | 1 天 | 3 小时 |
 | 微信采集（做了第十三步才有） | `HC_COLLECT_WECHAT` | 10 分钟 | 1 小时 |
 | 公众号抓取（做了第十四步才有） | `HC_FETCH_WECHAT_ARTICLES` | 10 分钟 | 1 小时 |
+| 讯飞录音采集（做了第十五步才有） | `HC_COLLECT_IFLYREC` | 10 分钟 | 1 小时 |
 
 Grace 留宽一点，是为了偶尔慢一两轮、网络抖一下不误报。不想建这么多，至少建**邮件采集**一个：它每 10 分钟都跑，电脑一停它就会报。
 
@@ -514,7 +517,7 @@ py ops\set_key.py healthchecks HC_COLLECT_MAIL https://hc-ping.com/这里换成�
 4. 测试：不用重跑安装脚本。等十来分钟，网站上那几个检查从灰色变成**绿色**（Up），就说明打卡通了。每天一次的复盘和备份，要等它们第一次跑完才会变绿。
 5. 真出事时：电脑关机、睡着或断网超过 Grace 时间，邮箱会收到一封标题带「DOWN」的邮件；电脑恢复后再收到一封「UP」。
 
-注意：免费账号最多 20 个检查，上面 7 个够用。
+注意：免费账号最多 20 个检查，上面 8 个够用。
 
 ---
 
@@ -663,6 +666,116 @@ py ops\fetch_wechat_articles.py
 
 ---
 
+## 第十五步（可选）：讯飞录音笔
+
+用讯飞录音笔（讯飞听见 App）录的会议和谈话，接进来后每 10 分钟把新录音的「讯飞生成的总结」和「带发言人的转写」存进 `spaces\me\raw\iflyrec\<录音日期>\`，问「今天那场会定了什么」能带出处回答，每晚的复盘也会算上。**只有文字，不存录音的声音。**
+
+1. 在项目文件夹里运行（要先拉过更新，见下面「已经装好的：这次怎么更新」）：
+
+```powershell
+py ops\install_iflyrec.py
+```
+
+它会下载讯飞官方的只读客户端（逐个核对指纹），放进 `.agentos\iflyrec-skill\`（授权凭据放 `.agentos\iflyrec-auth\`，AI 读不到），然后给出一个讯飞的链接和用户码。
+
+2. 在浏览器打开链接，核对用户码，用**录音笔绑定的讯飞账号**登录、点同意。窗口里会自动等，看到 `✅ 讯飞录音笔授权成功` 就好了。权限只有读录音、读转写、读总结，不会上传、修改、删除录音。
+3. 再运行一次安装脚本，装上每 10 分钟的采集（任务名 `AgentOS-collect-iflyrec`）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
+```
+
+4. 想马上采、不等十分钟：
+
+```powershell
+py ops\collect_iflyrec.py
+```
+
+最后一行是 `讯飞录音采集完成：新存 N 条`，到 `spaces\me\raw\iflyrec\` 里看。第一次往回取 30 天，每轮最多 15 条；录音多的话，想一次采完可以这样跑（会久一点）：
+
+```powershell
+$env:IFLYREC_WINDOW_DAYS=3650; $env:IFLYREC_MAX_PER_RUN=200; py ops\collect_iflyrec.py
+```
+
+要知道的：
+- 刚录完的要等讯飞转写好（十几分钟到一小时）才进来；2 天后还没有转写，就只存标题和总结。
+- 讯飞的授权失效时，`collect-iflyrec.log` 里会写「授权失效」并告警，重跑第 1 步就行。
+- 想往回取更久：`$HOME\.agentos\iflyrec.env` 里写一行 `IFLYREC_INITIAL_DAYS=90`，并删掉 `$HOME\.agentos\iflyrec_state.json` 再跑。
+- 用法举例：在飞书里问「今天那两场会定了什么、谁负责」「上个月录音里提到商业化的地方都找出来」「把昨天那场会整理成会议纪要 Word」。
+
+---
+
+## 第十六步（可选）：写飞书文档
+
+做完这一步，在飞书里说「建一个飞书文档，写上……」「往那篇文档里补上……」，AI 写好内容，机器人**以你本人身份**建在你的飞书云盘里，把链接发给你。
+
+1. 开放平台 → 权限管理，开 `docx:document`（创建及编辑新版文档）、`docs:document.media:upload`（上传图片到云文档），都是**用户身份**；发布新版本，等审批通过。
+2. 重新授权（会自动打开浏览器，登录、点「授权」）：
+
+```powershell
+py ops\feishu_auth.py
+```
+
+3. （可选）想建在某个文件夹里：浏览器打开那个文件夹，复制网址里 `/folder/` 后面那串字符，运行：
+
+```powershell
+py ops\set_key.py bridge FEISHU_DOC_FOLDER 这里换成那串字符
+```
+
+不设就建在「我的空间」根目录。
+
+4. 重启机器人：
+
+```powershell
+py ops\deploy.py
+```
+
+5. 验收：手机飞书发「建一个飞书文档，标题叫测试，写三条今天的待办」，过一会儿收到「📄 已建好飞书文档《测试》：链接」；再发「往测试那篇里补一条：明天下午开会」，收到「📄 已把内容补进《测试》」。
+
+要知道的：
+- 只往**机器人自己建的**文档里补内容，而且只加在末尾；你或别人原有的文档不会去改。建过的文档记在 `$HOME\.agentos\feishu_docs_written.json`。
+- 新文档默认只有你能看，要给别人看在飞书里自己分享。
+- 正文里的图片（飞书文档、微信、收件箱里下载过的）会传进文档；网上的图片换成链接。
+- 收到「像是缺写文档的权限」：第 1 步的权限没开或没审批通过，或者开了但没做第 2 步。
+
+---
+
+## 已经装好的：这次怎么更新（讯飞录音笔、写飞书文档）
+
+之前已经按本教程装好、能用的，按下面做，**原来的配置、钥匙、知识库都不用动**。不用讯飞录音笔的跳过第 4 步；不用写飞书文档的跳过第 1、3 步。
+
+1. **先开飞书权限**（可能要等审批，先做）：开放平台 → 权限管理 → 开 `docx:document`、`docs:document.media:upload`（用户身份）→ 发布新版本。
+2. **拉更新**，在项目文件夹里：
+
+```powershell
+git pull --no-edit upstream main
+```
+
+3. **权限审批通过后，重新授权**：
+
+```powershell
+py ops\feishu_auth.py
+```
+
+   看到 `✅ 授权成功`，并且下面**没有** `⚠️ 以下权限没有授予` 就对了。想建在某个文件夹，再做第十六步第 3 步。
+4. **接讯飞录音笔**：
+
+```powershell
+py ops\install_iflyrec.py
+```
+
+   打开它给的链接，登录讯飞账号点同意，等到 `✅ 讯飞录音笔授权成功`。
+5. **重跑安装脚本**（装上讯飞的定时任务，同时重启机器人，让写飞书文档生效）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
+```
+
+   输出里有 `✅ AgentOS-collect-iflyrec` 和 `✅ AgentOS-Bridge` 就对了。已经装过的部分会自动跳过或原样重装，不会弄坏。
+6. **验收**：按第十五步第 4 步、第十六步第 5 步各试一次。配了 healthchecks 的，给讯飞采集加一个检查（11.2 表里的 `HC_COLLECT_IFLYREC`）。
+
+---
+
 ## 日常和排错
 
 - **日志**都在 `C:\Users\你的用户名\.agentos\logs\`：`bridge.log`（机器人）、`collect-mail.log`、`daily-review.log` 等。
@@ -687,6 +800,7 @@ py ops\deploy.py
   如果更新里加了新的定时任务，再运行一次安装脚本。
 - **电脑重启后**：要**登录一次 Windows**，机器人和定时任务才会开始跑。
 - **钥匙失效**（机器人突然不回、复盘写不出来）：回第四步重新填，再跑 `check_agent.py`。
+- **讯飞录音采不到了**（`collect-iflyrec.log` 里写「授权失效」）：重跑 `py ops\install_iflyrec.py` 授权。
 - **微信突然采不到了**（日志 `collect-wechat.log` 里说钥匙对不上）：微信退出登录或更新过，回第十三步 13.2 重新取钥匙，再跑 `py ops\collect_wechat.py --check`。
 - **知识库**（`spaces\me\kb\`）是 AI 写的，要改就在飞书里让它改，自己改容易和备份冲突。
 
@@ -707,3 +821,5 @@ py ops\deploy.py
 - 第十二步 出 Word 中文正常、截图里的字能搜到、复盘、备份：
 - 第十三步 微信版本号、钥匙文件有没有、`--check` 的结果、采到几条：
 - 第十四步 公众号文章抓到没有：
+- 第十五步 讯飞授权成功没有、`collect_iflyrec.py` 存了几条：
+- 第十六步 建文档、补内容各收到链接没有：

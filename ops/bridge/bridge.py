@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # ops/：agentos_env；写飞书文档要用 feishu_user
 import outbox  # noqa: E402
 from agentos_env import NO_WINDOW, REPO, kill_tree, python  # noqa: E402
 
@@ -53,6 +53,7 @@ HELP_TEXT = """**能做什么**
 - 「查一下某公司 / 某行业」：网上调研，附来源链接
 - 「这周我和某某谈了什么」：查往来记录
 - 「把这份发到 xx@xx.com」：我写好草稿，弹确认卡片，你点「发送」才发
+- 「建一个飞书文档，写上……」「往那篇文档里补上……」：建在你的云盘里，把链接发给你
 - 发图片、文件给我：存进收件箱，我看完告诉你是什么
 
 **每晚 23:00**
@@ -95,6 +96,8 @@ class Config:
     mail_password: str = ""
     smtp_host: str = ""
     smtp_port: int = 465
+    # 写飞书文档：建在哪个云盘文件夹（空 = 「我的空间」根目录）
+    doc_folder: str = ""
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -117,6 +120,7 @@ class Config:
             smtp_host=os.environ.get("MAIL_SMTP_HOST")
             or os.environ.get("MAIL_IMAP_HOST", "").replace("imap.", "smtp.", 1),
             smtp_port=int(os.environ.get("MAIL_SMTP_PORT", "465")),
+            doc_folder=os.environ.get("FEISHU_DOC_FOLDER", "").strip(),
         )
 
 
@@ -481,6 +485,7 @@ class Bridge:
         self.running: dict[str, int] = {}  # chat_id → 正在跑的任务 id
         self.procs: dict[str, subprocess.Popen] = {}  # chat_id → 该任务的 Claude 进程
         self.stopped: set[int] = set()  # 被「停止」中止的任务 id
+        self.doc_lock = threading.Lock()  # 同一文件夹并发建文档飞书会报「文件夹被锁」，一次只写一份
 
     # 飞书事件回调：必须 3 秒内返回，只做校验、入队和回「收到」
     def on_message(self, message_id: str, chat_id: str, chat_type: str, sender: str,
@@ -558,6 +563,25 @@ class Bridge:
                 self.feishu.send_text(chat_id, f"⚠️ {path.name} 超过 30MB，没法发到飞书，文件在 {path}")
             elif not self.feishu.send_file(chat_id, path):
                 self.feishu.send_text(chat_id, f"⚠️ {path.name} 发送失败，文件在 {path}")
+
+    def _write_docs(self, chat_id: str, task_id: int) -> None:
+        """写飞书文档：Agent 放进 outbox/feishu-docs/<任务号>/ 的请求，以你本人身份建文档或补内容。"""
+        d = Path(self.cfg.runtime_dir) / "spaces/me/outbox/feishu-docs" / str(task_id)
+        if not d.is_dir():
+            return
+        import feishu_write  # 用到才导入：没开写文档也不影响桥接服务
+        for path in sorted(d.glob("*.json")):
+            try:
+                with self.doc_lock:
+                    text = feishu_write.process(path, Path(self.cfg.runtime_dir),
+                                                STATE_DIR / "feishu_docs_written.json", self.cfg.doc_folder)
+            except Exception as e:  # noqa: BLE001 — 失败要告诉你，不能静默
+                log.exception("write doc %s failed", path)
+                hint = ""
+                if "99991679" in str(e) or "99991672" in str(e) or "1770032" in str(e):
+                    hint = "（像是缺写文档的权限：开放平台开通 docx:document、docs:document.media:upload 后重新运行 ops/feishu_auth.py）"
+                text = f"⚠️ 飞书文档没写成（{path.name}）：{e}{hint}"
+            self.feishu.send_text(chat_id, text)
 
     # ---------- 两步确认：草稿 → 确认卡片 → 你点「发送」才发 ----------
 
@@ -710,7 +734,8 @@ class Bridge:
                     self._async(stop_process, proc)
 
             prompt = (f"{task['text']}\n\n（系统提示：本任务号 {task['id']}。要给用户发文件，把成品放进 "
-                      f"spaces/me/outbox/{task['id']}/，做完会自动发到飞书。）")
+                      f"spaces/me/outbox/{task['id']}/，做完会自动发到飞书。要建或补飞书文档，把请求放进 "
+                      f"spaces/me/outbox/feishu-docs/{task['id']}/。）")
             res = run_agent(self.cfg, prompt, session_id, on_stuck, on_start)
             if (res.is_error and session_id and task["id"] not in self.stopped
                     and "No conversation found" in (res.stderr + res.text)):
@@ -725,6 +750,7 @@ class Bridge:
                 return
             self.feishu.send_markdown(chat_id, ("⚠️ " if res.is_error else "") + res.text)
             self._send_outbox(chat_id, task["id"])
+            self._write_docs(chat_id, task["id"])
             self.store.finish(task["id"], not res.is_error, res.text[:500] if res.is_error else None)
             log.info("task %s %s in %.0fs", task["id"], "failed" if res.is_error else "done",
                      time.time() - started)

@@ -6,7 +6,7 @@
 #   2. 建专用 Python 环境（venv），装飞书 SDK（lark-oapi）、读 PDF 的 pypdf、读微信库、抓公众号文章、微信语音转文字用的几个包
 #   3. 让 Python 默认用 UTF-8（中文 Windows 默认 GBK，读写中文文件会乱码）
 #   4. 插电时不睡眠
-#   5. 在「任务计划程序」里装定时任务：飞书机器人（登录后常驻）、采集邮件、飞书、微信，抓公众号文章，提取文字（每 10 分钟）、
+#   5. 在「任务计划程序」里装定时任务：飞书机器人（登录后常驻）、采集邮件、飞书、微信、讯飞录音笔，抓公众号文章，提取文字（每 10 分钟）、
 #      每日复盘（23:00）、知识库备份（03:00）。电脑关着错过了，开机后补跑。
 $ErrorActionPreference = "Stop"
 
@@ -214,6 +214,11 @@ if (Test-Path $wxKeys) {
         }
     } else { Say "    ⚠️ 微信库读不出来（看上面的原因），微信采集这次没装" }
 } else { Say "    跳过微信采集：还没取微信钥匙（教程第十三步）" }
+
+# 讯飞录音笔：运行过 py ops\install_iflyrec.py（装好客户端、授权）才装
+if (Test-Path (Join-Path $State "iflyrec-skill\scripts\recording_assistant.py")) {
+    Install-Job "collect-iflyrec" 8 (Every10) @($jobPy, "`"$ops\collect_iflyrec.py`"")
+} else { Say "    跳过讯飞录音笔：没用的话不用管；要接就先运行 py ops\install_iflyrec.py（教程第十五步）" }
 
 Install-Job "extract-text" 8 (Every10) @($jobPy, "`"$ops\extract_text.py`"")
 

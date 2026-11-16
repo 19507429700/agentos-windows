@@ -709,7 +709,7 @@ $env:IFLYREC_WINDOW_DAYS=3650; $env:IFLYREC_MAX_PER_RUN=200; py ops\collect_ifly
 
 做完这一步，在飞书里说「建一个飞书文档，写上……」「往那篇文档里补上……」，AI 写好内容，机器人**以你本人身份**建在你的飞书云盘里，把链接发给你。
 
-1. 开放平台 → 权限管理，开 `docx:document`（创建及编辑新版文档）、`docx:document.block:convert`（转换文本为云文档块）、`docs:document.media:upload`（上传图片到云文档），都是**用户身份**；这三项都是免审权限，开通就生效，一般不用发布版本、等审批。
+1. 第九步的权限清单里**最后三项**（`docx:document`、`docx:document.block:convert`、`docs:document.media:upload`，用户身份）要开着。按本教程新装的，第九步已经开过，跳过这一条；以前装的，到开放平台 → 权限管理补开这三项。都是免审权限，开通就生效，不用发布版本、等审批。
 2. 重新授权（会自动打开浏览器，登录、点「授权」）：
 
 ```powershell
@@ -744,7 +744,7 @@ py ops\deploy.py
 
 之前已经按本教程装好、能用的，按下面做，**原来的配置、钥匙、知识库都不用动**。不用讯飞录音笔的跳过第 4 步；不用写飞书文档的跳过第 1、3 步。
 
-1. **先开飞书权限**：开放平台 → 权限管理 → 开 `docx:document`、`docx:document.block:convert`、`docs:document.media:upload`（用户身份）。都是免审权限，开通就生效。
+1. **补开飞书权限**：第九步的权限清单新加了最后三项。到开放平台 → 你自己的应用 → 权限管理 → 开通权限，切到「用户身份权限」，搜索并勾上 `docx:document`、`docx:document.block:convert`、`docs:document.media:upload`，点「确认开通权限」。都是免审权限，开通就生效。
 2. **拉更新**，在项目文件夹里：
 
 ```powershell

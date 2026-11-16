@@ -224,14 +224,8 @@ def create_doc(api, title: str, folder: str) -> str:
     return api.post("/docx/v1/documents", body)["document"]["document_id"]
 
 
-def doc_url(api, doc_id: str) -> str:
-    try:
-        metas = api.post("/drive/v1/metas/batch_query",
-                         {"request_docs": [{"doc_token": doc_id, "doc_type": "docx"}], "with_url": True}).get("metas")
-        if metas and metas[0].get("url"):
-            return metas[0]["url"]
-    except fu.FeishuError:
-        pass
+def doc_url(doc_id: str) -> str:
+    """feishu.cn/docx/<ID> 会自动跳到你组织的域名（查真实网址要多开一项权限，不值得）。"""
     return f"https://feishu.cn/docx/{doc_id}"
 
 
@@ -284,7 +278,7 @@ def process(path: Path, runtime: Path, registry_path: Path, folder: str, api=Non
     relations = insert_blocks(api, doc_id, first, blocks)
     problems += fill_images(api, doc_id, img_blocks, images, relations, sleep)
     if not reg[doc_id].get("url"):
-        reg[doc_id]["url"] = doc_url(api, doc_id)
+        reg[doc_id]["url"] = doc_url(doc_id)
     reg[doc_id]["updated"] = now or time.time()
     save_registry(registry_path, reg)
     url = reg[doc_id]["url"]

@@ -51,8 +51,6 @@ class FakeApi:
             self.docs[did] += body["children_id"]
             return {"block_id_relations": [{"temporary_block_id": b["block_id"], "block_id": "real_" + b["block_id"]}
                                            for b in body["descendants"]]}
-        if path == "/drive/v1/metas/batch_query":
-            return {"metas": [{"url": "https://x.feishu.cn/docx/" + body["request_docs"][0]["doc_token"]}]}
         raise AssertionError(path)
 
     def patch(self, path, body, params=None):
@@ -95,7 +93,7 @@ class WriteTest(unittest.TestCase):
                          title="周会纪要")
         msg = self.run_req(p)
         [did] = self.api.docs
-        self.assertEqual(msg, f"📄 已建好飞书文档《周会纪要》：https://x.feishu.cn/docx/{did}")
+        self.assertEqual(msg, f"📄 已建好飞书文档《周会纪要》：https://feishu.cn/docx/{did}")
         create = self.api.calls[0]
         self.assertEqual(create[2], {"title": "周会纪要", "folder_token": "FOLDER"})
         convert = self.api.calls[1][2]["content"]

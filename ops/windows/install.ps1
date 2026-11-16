@@ -3,7 +3,7 @@
 # 可以重复运行：每次都会补上还没装的部分（哪一项的钥匙填好了，就装哪一项的定时任务），不会弄坏已有的。
 # 做的事：
 #   1. 建 %USERPROFILE%\.agentos（钥匙、日志、Python 环境），生成空白配置：bridge.env、mail.env、agent.env、wechat.env
-#   2. 建专用 Python 环境（venv），装飞书 SDK（lark-oapi）、读 PDF 的 pypdf、读微信库和抓公众号文章用的几个包
+#   2. 建专用 Python 环境（venv），装飞书 SDK（lark-oapi）、读 PDF 的 pypdf、读微信库、抓公众号文章、微信语音转文字用的几个包
 #   3. 让 Python 默认用 UTF-8（中文 Windows 默认 GBK，读写中文文件会乱码）
 #   4. 插电时不睡眠
 #   5. 在「任务计划程序」里装定时任务：飞书机器人（登录后常驻）、采集邮件、飞书、微信，抓公众号文章，提取文字（每 10 分钟）、
@@ -115,7 +115,7 @@ if (-not (Test-Path $Py)) {
     if (-not (Test-Path $Py)) { throw "建 Python 环境失败（$Venv）" }
 }
 & $Py -m pip install -q --disable-pip-version-check --upgrade pip
-& $Py -m pip install -q --disable-pip-version-check -r (Join-Path $Repo "ops\bridge\requirements.txt") pypdf cryptography zstandard requests beautifulsoup4
+& $Py -m pip install -q --disable-pip-version-check -r (Join-Path $Repo "ops\bridge\requirements.txt") pypdf cryptography zstandard requests beautifulsoup4 faster-whisper silk-python
 if ($LASTEXITCODE -ne 0) { throw "装 Python 包失败。国内网络慢的话，先运行：$Py -m pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple ，再重跑本脚本。" }
 Say "    $Py"
 
@@ -204,6 +204,14 @@ if (Test-Path $wxKeys) {
     if ($LASTEXITCODE -eq 0) {
         Install-Job "collect-wechat" 8 (Every10) @($jobPy, "`"$ops\collect_wechat.py`"")
         Install-Job "fetch-wechat-articles" 15 (Every10) @($jobPy, "`"$ops\fetch_wechat_articles.py`"")
+        # 语音转文字的模型（约 460MB，只下一次）。wechat.env 里写了 WECHAT_VOICE=0 就不下
+        if (Select-String -Path $wechatEnv -Pattern "^\s*WECHAT_VOICE\s*=\s*0" -Quiet -ErrorAction SilentlyContinue) {
+            Say "    语音转文字已关（WECHAT_VOICE=0），不下模型"
+        } else {
+            & $Py -X utf8 (Join-Path $ops "download_whisper.py")
+            if ($LASTEXITCODE -eq 0) { Say "    ✅ 语音转文字（微信语音会写成「[语音 14秒] 转出的文字」）" }
+            else { Say "    ⚠️ 语音模型没下好，语音这次只留「[语音]」；重跑本脚本会接着下" }
+        }
     } else { Say "    ⚠️ 微信库读不出来（看上面的原因），微信采集这次没装" }
 } else { Say "    跳过微信采集：还没取微信钥匙（教程第十三步）" }
 

@@ -579,7 +579,7 @@ class Bridge:
                 log.exception("write doc %s failed", path)
                 hint = ""
                 if "99991679" in str(e) or "99991672" in str(e) or "1770032" in str(e):
-                    hint = "（像是缺写文档的权限：开放平台开通 docx:document、docs:document.media:upload 后重新运行 ops/feishu_auth.py）"
+                    hint = "（像是缺写文档的权限：开放平台开通 docx:document、docx:document.block:convert、docs:document.media:upload 后重新运行 ops/feishu_auth.py）"
                 text = f"⚠️ 飞书文档没写成（{path.name}）：{e}{hint}"
             self.feishu.send_text(chat_id, text)
 

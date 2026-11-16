@@ -381,9 +381,9 @@ powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 ## 第九步：飞书采集（读你的聊天、文档、日程）
 
 开放平台 → 权限管理，开下面这些（**用户身份**）：
-`offline_access`、`im:message:readonly`、`im:message.p2p_msg:get_as_user`、`im:message.group_msg:get_as_user`、`im:chat:readonly`、`search:message`、`contact:user.base:readonly`、`contact:contact.base:readonly`、`docx:document:readonly`、`wiki:wiki:readonly`、`calendar:calendar:readonly`、`minutes:minutes.transcript:export`、`docs:document.media:download`、`sheets:spreadsheet:readonly`、`bitable:app:readonly`、`drive:drive:readonly`、`docx:document`、`docs:document.media:upload`
+`offline_access`、`im:message:readonly`、`im:message.p2p_msg:get_as_user`、`im:message.group_msg:get_as_user`、`im:chat:readonly`、`search:message`、`contact:user.base:readonly`、`contact:contact.base:readonly`、`docx:document:readonly`、`wiki:wiki:readonly`、`calendar:calendar:readonly`、`minutes:minutes.transcript:export`、`docs:document.media:download`、`sheets:spreadsheet:readonly`、`bitable:app:readonly`、`drive:drive:readonly`、`docx:document`、`docx:document.block:convert`、`docs:document.media:upload`
 
-最后两项是让机器人能**建飞书文档、往里补内容**（第十六步）；不想用这个功能可以不开，其他功能照常。
+最后三项是让机器人能**建飞书文档、往里补内容**（第十六步）；不想用这个功能可以不开，其他功能照常。
 
 安全设置 → 重定向 URL 加：`http://localhost:18080/feishu/callback`。发布新版本，审批通过后授权（会自动打开浏览器，登录、点「授权」）：
 
@@ -709,7 +709,7 @@ $env:IFLYREC_WINDOW_DAYS=3650; $env:IFLYREC_MAX_PER_RUN=200; py ops\collect_ifly
 
 做完这一步，在飞书里说「建一个飞书文档，写上……」「往那篇文档里补上……」，AI 写好内容，机器人**以你本人身份**建在你的飞书云盘里，把链接发给你。
 
-1. 开放平台 → 权限管理，开 `docx:document`（创建及编辑新版文档）、`docs:document.media:upload`（上传图片到云文档），都是**用户身份**；发布新版本，等审批通过。
+1. 开放平台 → 权限管理，开 `docx:document`（创建及编辑新版文档）、`docx:document.block:convert`（转换文本为云文档块）、`docs:document.media:upload`（上传图片到云文档），都是**用户身份**；这三项都是免审权限，开通就生效，一般不用发布版本、等审批。
 2. 重新授权（会自动打开浏览器，登录、点「授权」）：
 
 ```powershell
@@ -744,14 +744,14 @@ py ops\deploy.py
 
 之前已经按本教程装好、能用的，按下面做，**原来的配置、钥匙、知识库都不用动**。不用讯飞录音笔的跳过第 4 步；不用写飞书文档的跳过第 1、3 步。
 
-1. **先开飞书权限**（可能要等审批，先做）：开放平台 → 权限管理 → 开 `docx:document`、`docs:document.media:upload`（用户身份）→ 发布新版本。
+1. **先开飞书权限**：开放平台 → 权限管理 → 开 `docx:document`、`docx:document.block:convert`、`docs:document.media:upload`（用户身份）。都是免审权限，开通就生效。
 2. **拉更新**，在项目文件夹里：
 
 ```powershell
 git pull --no-edit upstream main
 ```
 
-3. **权限审批通过后，重新授权**：
+3. **重新授权**：
 
 ```powershell
 py ops\feishu_auth.py

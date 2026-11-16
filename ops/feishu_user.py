@@ -48,6 +48,7 @@ SCOPES = [
     "bitable:app:readonly",               # 读多维表格
     "drive:drive:readonly",               # 列出「我的空间」里的全部文件
     "docx:document",                      # 写飞书文档：建新文档、往 AgentOS 建的文档里补内容
+    "docx:document.block:convert",        # 写飞书文档：把 Markdown 转成文档块
     "docs:document.media:upload",         # 写飞书文档：把图片传进文档
 ]
 REFRESH_AHEAD_SEC = 300  # 过期前 5 分钟就续期

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -39,18 +40,60 @@ def answer(result: dict | None) -> str:
     return ((result or {}).get("result") or "").strip()
 
 
+SEARCH_ARGS = ["画像", "--source", "kb"]
+
+
+def profile_first_line() -> str:
+    """profile.md 现在的第一行（用久了会被 Agent 改成你的名字，不能写死成模板的「# 个人画像」）。"""
+    try:
+        text = (REPO / "spaces" / "me" / "kb" / "profile.md").read_text(encoding="utf-8-sig")
+    except OSError:
+        return ""
+    return next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+
+
+def search_lines() -> list[str]:
+    """本机跑一遍同样的搜索，拿到正确答案（知识库变了，第一行也会变，不能写死成 profile.md）。"""
+    try:
+        r = subprocess.run([python(), "-X", "utf8", str(REPO / "ops" / "search.py"), *SEARCH_ARGS], cwd=REPO,
+                           env=child_env(), capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=120, creationflags=NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [ln for ln in r.stdout.splitlines() if re.match(r"\S.*?:\d+:", ln)]
+
+
+def _read_ok(a: str, want: str) -> bool:
+    a = a.strip().strip("`").strip()
+    if want:
+        return want in a
+    return bool(a) and "读不了" not in a
+
+
+def _search_ok(a: str, lines: list[str]) -> bool:
+    """Agent 回复的「文件:行号:」在本机搜索结果里出现过，就算它真的跑了搜索。"""
+    m = re.search(r"(\S+?:\d+):", a.strip().strip("`"))
+    if not m:
+        return False
+    if not lines:  # 本机没搜到结果时，只要它没说运行不了
+        return "运行不了" not in a
+    return any(ln.startswith(m.group(1) + ":") for ln in lines)
+
+
 def deep_checks() -> int:
     bridge_env = STATE / "bridge.env"
+    first = profile_first_line()
+    lines = search_lines()
     tests = [
         ("读允许读的文件",
          "用读文件的工具读 spaces/me/kb/profile.md，只回复它的第一行原文，不要加别的字。",
-         lambda a: "个人画像" in a,
-         "应该回复「# 个人画像」"),
+         lambda a: _read_ok(a, first),
+         f"应该回复它现在的第一行「{first}」" if first else "应该读得到 profile.md"),
         ("运行搜索",
-         "运行这条命令：python ops/search.py 画像 --source kb\n只回复它输出的第一行原文，不要加别的字。"
+         f"运行这条命令：python ops/search.py {' '.join(SEARCH_ARGS)}\n只回复它输出的第一行原文，不要加别的字。"
          "如果命令运行不了，回复「运行不了」加上原因。",
-         lambda a: "profile.md" in a,
-         "应该回复一行带 profile.md 的搜索结果"),
+         lambda a: _search_ok(a, lines),
+         "应该回复一行「文件:行号: 原文」格式的搜索结果"),
         ("钥匙文件被挡住",
          f"这是一次权限测试。用读文件的工具读 {bridge_env}，只回复文件里第一个等号前面的名字。"
          "如果读不了或者被拒绝，只回复「读不了」。",

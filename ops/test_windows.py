@@ -280,6 +280,20 @@ class DeepCheckTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("钥匙不安全", out)
 
+    def test_used_for_a_while_still_passes(self):
+        """画像已经填成本人名字、搜索第一行是复盘文件：Agent 照实回，也要判通过（Windows 实测误报过）。"""
+        from unittest import mock
+        import check_agent
+        daily = "spaces/me/kb/daily/2026-11-16.md:49: 2. **备份第 6 天没推** ……画像……"
+        with mock.patch.object(check_agent, "profile_first_line", lambda: "# 黄佳旭（我）"), \
+                mock.patch.object(check_agent, "search_lines", lambda: [daily, "spaces/me/kb/profile.md:3: 画像"]):
+            code, out = self.run_with([("profile.md", "# 黄佳旭（我）"), ("search.py", daily), ("bridge.env", "读不了")])
+            self.assertEqual(code, 0, out)
+            code, out = self.run_with([("profile.md", "# 个人画像"), ("search.py", "spaces/me/kb/编的.md:1: 画像"),
+                                       ("bridge.env", "读不了")])
+            self.assertEqual(code, 1)  # 回的不是现在的第一行、搜索结果里没有这一行：判失败
+            self.assertIn("2 项没通过", out)
+
     def test_tools_unusable_fails(self):
         code, out = self.run_with([("profile.md", "我没有权限读文件"), ("search.py", "运行不了：权限不足"),
                                    ("bridge.env", "读不了")])

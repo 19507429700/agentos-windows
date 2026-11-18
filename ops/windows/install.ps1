@@ -114,9 +114,16 @@ if (-not (Test-Path $Py)) {
     & $found[0] @rest -m venv $Venv
     if (-not (Test-Path $Py)) { throw "建 Python 环境失败（$Venv）" }
 }
-& $Py -m pip install -q --disable-pip-version-check --upgrade pip
-& $Py -m pip install -q --disable-pip-version-check -r (Join-Path $Repo "ops\bridge\requirements.txt") pypdf cryptography zstandard requests beautifulsoup4 faster-whisper silk-python
-if ($LASTEXITCODE -ne 0) { throw "装 Python 包失败。国内网络慢的话，先运行：$Py -m pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple ，再重跑本脚本。" }
+# 默认用清华镜像（国内直连快）；自己用 pip config 配过镜像的照旧用自己的；在国外想用官方源：先 $env:AGENTOS_PIP_INDEX="https://pypi.org/simple"
+$pipIndex = $env:AGENTOS_PIP_INDEX
+if (-not $pipIndex) {   # 没配过时 pip 会往错误输出写一行，脚本是「出错就停」模式，所以要接住
+    try { $pipIndex = (& $Py -m pip config get global.index-url 2>$null) } catch { $pipIndex = $null }
+}
+if (-not $pipIndex) { $pipIndex = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+Say "    装 Python 包（来源 $pipIndex）……"
+& $Py -m pip install -q --disable-pip-version-check -i $pipIndex --upgrade pip
+& $Py -m pip install -q --disable-pip-version-check -i $pipIndex -r (Join-Path $Repo "ops\bridge\requirements.txt") pypdf cryptography zstandard requests beautifulsoup4 faster-whisper silk-python
+if ($LASTEXITCODE -ne 0) { throw "装 Python 包失败（来源 $pipIndex）。看看网络，或者换个来源再重跑：`$env:AGENTOS_PIP_INDEX=`"https://mirrors.aliyun.com/pypi/simple`"" }
 Say "    $Py"
 
 # ---------- 3. UTF-8 ----------
@@ -143,14 +150,35 @@ function New-Settings([int]$limitMin) {
     return New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
         -MultipleInstances IgnoreNew -ExecutionTimeLimit $limit
 }
+$jobFailed = @()
+function Register-Job($taskName, $action, $trigger, $principal, $settings) {
+    # 同名任务以前是在「管理员」PowerShell 里装的，普通 PowerShell 改不了它，会报「拒绝访问」：
+    # 先试着删掉旧的再装；还不行就记下来，接着装别的，最后统一告诉你怎么处理（不让一个任务卡住后面所有步骤）
+    try {
+        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal `
+            -Settings $settings -Force -ErrorAction Stop | Out-Null
+        return $true
+    } catch {
+        try {
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal `
+                -Settings $settings -ErrorAction Stop | Out-Null
+            return $true
+        } catch {
+            $script:jobFailed += $taskName
+            Say "    ❌ $taskName 没装上：$($_.Exception.Message.Trim())"
+            return $false
+        }
+    }
+}
 function Install-Job($name, $timeoutMin, $trigger, [string[]]$cmd) {
     # 经 run_job.py 跑：写日志、超时、失败告警、healthchecks 打卡
     $argv = @("-X", "utf8", "`"$runJob`"", $name, $timeoutMin, "--") + $cmd
     $action = New-ScheduledTaskAction -Execute $Pyw -Argument ($argv -join " ") -WorkingDirectory $Repo
     $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
-    Register-ScheduledTask -TaskName "AgentOS-$name" -Action $action -Trigger $trigger -Principal $principal `
-        -Settings (New-Settings ($timeoutMin + 5)) -Force | Out-Null
-    Say "    ✅ AgentOS-$name"
+    if (Register-Job "AgentOS-$name" $action $trigger $principal (New-Settings ($timeoutMin + 5))) {
+        Say "    ✅ AgentOS-$name"
+    }
 }
 function Every10() {
     # 每天 00:00 起、每 10 分钟一次、持续一天，天天如此（比「无限重复」在各版本 Windows 上都稳）
@@ -171,10 +199,11 @@ if ((Has-Value $bridgeEnv "FEISHU_APP_ID") -and (Has-Value $bridgeEnv "FEISHU_AP
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
         -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
     $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
-    Register-ScheduledTask -TaskName "AgentOS-Bridge" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-    Stop-ScheduledTask -TaskName "AgentOS-Bridge" -ErrorAction SilentlyContinue
-    Start-ScheduledTask -TaskName "AgentOS-Bridge"
-    Say "    ✅ AgentOS-Bridge（飞书机器人，已启动；日志 $Logs\bridge.log）"
+    if (Register-Job "AgentOS-Bridge" $action $trigger $principal $settings) {
+        Stop-ScheduledTask -TaskName "AgentOS-Bridge" -ErrorAction SilentlyContinue
+        Start-ScheduledTask -TaskName "AgentOS-Bridge"
+        Say "    ✅ AgentOS-Bridge（飞书机器人，已启动；日志 $Logs\bridge.log）"
+    }
 } else {
     Say "    跳过飞书机器人：bridge.env 里还没填 FEISHU_APP_ID / FEISHU_APP_SECRET"
 }
@@ -239,14 +268,10 @@ if ($LASTEXITCODE -eq 0) {
 # ---------- 底座 ----------
 $engine = ((Get-Content (Join-Path $State "agent.env") -Encoding UTF8 | Where-Object { $_ -match "^\s*AGENT_ENGINE\s*=" }) -replace "^\s*AGENT_ENGINE\s*=\s*", "").Trim()
 if (-not $engine) { $engine = "claude" }
-$found = Get-Command $engine -ErrorAction SilentlyContinue
-if (-not $found) {
-    foreach ($d in @("$env:USERPROFILE\.local\bin", "$env:APPDATA\npm")) {
-        if ((Test-Path (Join-Path $d "$engine.exe")) -or (Test-Path (Join-Path $d "$engine.cmd"))) { $found = $true }
-    }
-}
+# 和机器人真正运行时用同一套找法（run_agent.py）：CodeBuddy 装在 %LOCALAPPDATA%\codebuddy\bin、PATH 还没刷新也算装了
+$found = & $Py -X utf8 -c "import sys; sys.path.insert(0, r'$ops'); import run_agent; e, env = run_agent.build_env(); print(run_agent.find_exe(e, env) or '')"
 Say ""
-if ($found) { Say "底座：$engine 已安装。" } else { Say "⚠️ 底座 $engine 还没装，按教程「装底座」那一步装。" }
+if ($found) { Say "底座：$engine 已安装（$found）。" } else { Say "⚠️ 底座 $engine 还没装，按教程「装底座」那一步装。" }
 if ($engine -eq "claude") {
     # Claude Code 在 Windows 上要用 Git 自带的 bash。Git 不一定装在 C 盘，顺着 git 命令的位置找
     $bash = & $Py -X utf8 -c "import sys; sys.path.insert(0, r'$ops'); import run_agent; print(run_agent.find_git_bash() or '')"
@@ -254,3 +279,10 @@ if ($engine -eq "claude") {
     else { Say "⚠️ 没找到 Git 自带的 bash.exe（Claude Code 要用）。装了 Git 的话，在 agent.env 里加一行 CLAUDE_CODE_GIT_BASH_PATH=你的Git目录\bin\bash.exe" }
 }
 Say "全部定时任务：任务计划程序 → 任务计划程序库，名字以 AgentOS- 开头。日志在 $Logs"
+if ($jobFailed.Count -gt 0) {
+    Say ""
+    Say "⚠️ 有 $($jobFailed.Count) 个定时任务没装上：$($jobFailed -join '、')"
+    Say "   多半是以前在「管理员」PowerShell 里装过，普通 PowerShell 改不了。处理：右键开始菜单 →「终端(管理员)」，运行"
+    foreach ($t in $jobFailed) { Say "     Unregister-ScheduledTask -TaskName $t -Confirm:`$false" }
+    Say "   关掉管理员窗口，回到普通 PowerShell 再运行一次本脚本。"
+}

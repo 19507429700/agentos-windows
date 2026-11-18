@@ -240,6 +240,16 @@ DOC_LINK_RE = re.compile(r"https?://[\w.-]*(?:feishu\.cn|larksuite\.com)/(wiki|d
 LINK_KIND = {"wiki": "wiki", "docx": "docx", "sheets": "sheet", "base": "bitable"}
 DOC_RECHECK_SEC = 600        # 已存过的每 10 分钟看一次有没有新版本（每份调一次接口）
 DOC_FAIL_RETRY_SEC = 86400   # 读不了的（没权限、类型不支持）一天后再试
+
+
+def why_unreadable(err: str) -> str:
+    """把飞书错误码翻成一句人话（日志里看得懂为什么读不了）。"""
+    for codes, text in ((("1770032", "1770040", "131006", "permission denied", "403", "forbidden", "99991672", "99991679"), "没有权限：文档是别人的、没分享给你"),
+                        (("1770002", "1770003", "90215", "404", "not found", "131005"), "文档已删除或链接失效"),
+                        (("91402", "1310214", "1069902"), "没有权限：文档是别人的、没分享给你")):
+        if any(c in err.lower() for c in codes):
+            return f"{text}；{err[:80]}"
+    return err[:120]
 DOC_LIST_EVERY_SEC = 600     # 每 10 分钟列一次我的云盘和文档库（和聊天采集一样快）
 DOC_TIME_BUDGET_SEC = 240    # 每轮最多花 4 分钟读文档，剩下的下一轮接着读（整个采集任务 8 分钟超时）
 DOC_FMT = 2                  # 存法的版本：2 = 按块读、表格保留、图片下载。旧版存的会按新存法重读一次
@@ -434,11 +444,13 @@ def collect_docs(st: dict, raw_dir: Path, http=fu.http_json, now: float | None =
                     title = node.get("title", "") or title
             if kind not in KIND_PREFIX:
                 d.update(title=title, error=f"类型 {kind or '未知'} 暂不支持读取", fmt=DOC_FMT)
+                log.info("读不了：%s（%s）", title or token, d["error"])
                 skipped += 1
                 continue
             n = _read_one(kind, obj_token, token, title, d, st, raw_dir, now, http, fetch)
         except fu.FeishuError as e:
             d.update(error=str(e)[:200], fmt=DOC_FMT)
+            log.info("读不了：%s（%s）", d.get("title") or title or token, why_unreadable(str(e)))
             skipped += 1
             continue
         if n is not None:

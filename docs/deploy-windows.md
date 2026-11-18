@@ -189,8 +189,7 @@ powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 
 装完**关掉 PowerShell 再重新打开**，然后 `cd $HOME\AgentOS`。
 
-> 装 Python 包很慢或失败：先运行下面这条换成国内镜像，再重跑安装脚本。
-> `& $HOME\.agentos\venv\Scripts\python.exe -m pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple`
+> 安装脚本默认从清华镜像装 Python 包，国内不用另外设置。装包失败的话，多半是网络问题，换个来源重跑：先运行 `$env:AGENTOS_PIP_INDEX="https://mirrors.aliyun.com/pypi/simple"`，再运行安装脚本。在国外用官方源更快：把地址换成 `https://pypi.org/simple`。
 
 ---
 
@@ -383,7 +382,7 @@ powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 开放平台 → 权限管理，开下面这些（**用户身份**）：
 `offline_access`、`im:message:readonly`、`im:message.p2p_msg:get_as_user`、`im:message.group_msg:get_as_user`、`im:chat:readonly`、`search:message`、`contact:user.base:readonly`、`contact:contact.base:readonly`、`docx:document:readonly`、`wiki:wiki:readonly`、`calendar:calendar:readonly`、`minutes:minutes.transcript:export`、`docs:document.media:download`、`sheets:spreadsheet:readonly`、`bitable:app:readonly`、`drive:drive:readonly`、`docx:document`、`docx:document.block:convert`、`docs:document.media:upload`
 
-最后三项是让机器人能**建飞书文档、往里补内容**（第十六步）；不想用这个功能可以不开，其他功能照常。
+最后三项是让机器人能**建飞书文档、往里补内容**（见本步最后）；不想用这个功能可以不开，其他功能照常。
 
 安全设置 → 重定向 URL 加：`http://localhost:18080/feishu/callback`。发布新版本，审批通过后授权（会自动打开浏览器，登录、点「授权」）：
 
@@ -398,6 +397,14 @@ powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 ```
 
 > 以后每次新开权限，审批通过后都要**重新运行 `feishu_auth.py`**，新权限才生效。
+
+**写飞书文档**（开了最后三项就能用，不用另外装）：在飞书里说「建一个飞书文档，写上……」「往那篇文档里补上……」，AI 写好内容，机器人**以你本人身份**建在你的飞书云盘里，把链接发给你。
+
+- 试一下：手机飞书发「建一个飞书文档，标题叫测试，写三条今天的待办」，过一会儿收到「📄 已建好飞书文档《测试》：链接」；再发「往测试那篇里补一条：明天下午开会」，收到「📄 已把内容补进《测试》」。
+- 想建在某个文件夹里（不设就建在「我的空间」根目录）：浏览器打开那个文件夹，复制网址里 `/folder/` 后面那串字符，运行 `py ops\set_key.py bridge FEISHU_DOC_FOLDER 那串字符`，再 `py ops\deploy.py` 重启机器人。
+- 只往**机器人自己建的**文档里补内容，而且只加在末尾；你或别人原有的文档不会去改。新文档默认只有你能看，要给别人看在飞书里自己分享。
+- 正文里的图片（飞书文档、微信、收件箱里下载过的）会传进文档；网上的图片换成链接。
+- 收到「像是缺写文档的权限」：最后三项没开，或者开了没重新运行 `feishu_auth.py`。
 
 ---
 
@@ -705,41 +712,6 @@ $env:IFLYREC_WINDOW_DAYS=3650; $env:IFLYREC_MAX_PER_RUN=200; py ops\collect_ifly
 
 ---
 
-## 第十六步（可选）：写飞书文档
-
-做完这一步，在飞书里说「建一个飞书文档，写上……」「往那篇文档里补上……」，AI 写好内容，机器人**以你本人身份**建在你的飞书云盘里，把链接发给你。
-
-1. 第九步的权限清单里**最后三项**（`docx:document`、`docx:document.block:convert`、`docs:document.media:upload`，用户身份）要开着。按本教程新装的，第九步已经开过，跳过这一条；以前装的，到开放平台 → 权限管理补开这三项。都是免审权限，开通就生效，不用发布版本、等审批。
-2. 重新授权（会自动打开浏览器，登录、点「授权」）：
-
-```powershell
-py ops\feishu_auth.py
-```
-
-3. （可选）想建在某个文件夹里：浏览器打开那个文件夹，复制网址里 `/folder/` 后面那串字符，运行：
-
-```powershell
-py ops\set_key.py bridge FEISHU_DOC_FOLDER 这里换成那串字符
-```
-
-不设就建在「我的空间」根目录。
-
-4. 重启机器人：
-
-```powershell
-py ops\deploy.py
-```
-
-5. 验收：手机飞书发「建一个飞书文档，标题叫测试，写三条今天的待办」，过一会儿收到「📄 已建好飞书文档《测试》：链接」；再发「往测试那篇里补一条：明天下午开会」，收到「📄 已把内容补进《测试》」。
-
-要知道的：
-- 只往**机器人自己建的**文档里补内容，而且只加在末尾；你或别人原有的文档不会去改。建过的文档记在 `$HOME\.agentos\feishu_docs_written.json`。
-- 新文档默认只有你能看，要给别人看在飞书里自己分享。
-- 正文里的图片（飞书文档、微信、收件箱里下载过的）会传进文档；网上的图片换成链接。
-- 收到「像是缺写文档的权限」：第 1 步的权限没开或没审批通过，或者开了但没做第 2 步。
-
----
-
 ## 已经装好的：这次怎么更新（讯飞录音笔、写飞书文档）
 
 之前已经按本教程装好、能用的，按下面做，**原来的配置、钥匙、知识库都不用动**。不用讯飞录音笔的跳过第 4 步；不用写飞书文档的跳过第 1、3 步。
@@ -757,7 +729,7 @@ git pull --no-edit upstream main
 py ops\feishu_auth.py
 ```
 
-   看到 `✅ 授权成功`，并且下面**没有** `⚠️ 以下权限没有授予` 就对了。想建在某个文件夹，再做第十六步第 3 步。
+   看到 `✅ 授权成功`，并且下面**没有** `⚠️ 以下权限没有授予` 就对了。想让文档建在某个文件夹，见第九步最后「写飞书文档」。
 4. **接讯飞录音笔**：
 
 ```powershell
@@ -772,7 +744,7 @@ powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 ```
 
    输出里有 `✅ AgentOS-collect-iflyrec` 和 `✅ AgentOS-Bridge` 就对了。已经装过的部分会自动跳过或原样重装，不会弄坏。
-6. **验收**：按第十五步第 4 步、第十六步第 5 步各试一次。配了 healthchecks 的，给讯飞采集加一个检查（11.2 表里的 `HC_COLLECT_IFLYREC`）。
+6. **验收**：按第十五步第 4 步、第九步最后「写飞书文档」里的「试一下」各试一次。配了 healthchecks 的，给讯飞采集加一个检查（11.2 表里的 `HC_COLLECT_IFLYREC`）。
 
 ---
 
@@ -800,6 +772,9 @@ py ops\deploy.py
   如果更新里加了新的定时任务，再运行一次安装脚本。
 - **电脑重启后**：要**登录一次 Windows**，机器人和定时任务才会开始跑。
 - **钥匙失效**（机器人突然不回、复盘写不出来）：回第四步重新填，再跑 `check_agent.py`。
+- **安装脚本最后说「有 N 个定时任务没装上」**（或者报 `Register-ScheduledTask : 拒绝访问`）：那几个任务以前是在「管理员」PowerShell 里装的，普通 PowerShell 改不了。照脚本最后打印的命令，在「终端(管理员)」里删掉它们，再回普通 PowerShell 重跑安装脚本。脚本不会因为这个停下，其他任务照装。
+- **采集日志里「新存 0 条」**：正常。定时任务每 10 分钟就采一次，你手动跑（或复盘前补采）时，新消息早被采走了。
+- **「文档：新存 N 份，读不了 M 份」**：读不了的多半是：别人的文档没分享给你、文档已删除、云盘里上传的 PDF/Word 这类文件（不是飞书文档）。具体是哪几份、为什么，看 `collect-feishu.log` 里「读不了：标题（原因）」那几行。读不了的一天后自动再试；「N 份留到下一轮」是一次读不完，下一轮接着读。
 - **讯飞录音采不到了**（`collect-iflyrec.log` 里写「授权失效」）：重跑 `py ops\install_iflyrec.py` 授权。
 - **微信突然采不到了**（日志 `collect-wechat.log` 里说钥匙对不上）：微信退出登录或更新过，回第十三步 13.2 重新取钥匙，再跑 `py ops\collect_wechat.py --check`。
 - **知识库**（`spaces\me\kb\`）是 AI 写的，要改就在飞书里让它改，自己改容易和备份冲突。
@@ -816,10 +791,9 @@ py ops\deploy.py
 - 第四步 选的哪种底座、`check_agent.py` 的结果：
 - 第六步 机器人连上飞书（日志里有没有 `connected`）：
 - 第八步 手机发消息有回复：
-- 第九步 飞书授权：
+- 第九步 飞书授权、建文档和补内容各收到链接没有：
 - 第十步 用的哪个邮箱、任务计划程序里的 AgentOS- 任务：
 - 第十二步 出 Word 中文正常、截图里的字能搜到、复盘、备份：
 - 第十三步 微信版本号、钥匙文件有没有、`--check` 的结果、采到几条：
 - 第十四步 公众号文章抓到没有：
 - 第十五步 讯飞授权成功没有、`collect_iflyrec.py` 存了几条：
-- 第十六步 建文档、补内容各收到链接没有：

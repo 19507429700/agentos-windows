@@ -576,6 +576,14 @@ def main(argv: list[str] | None = None) -> int:
         grp = [s["username"] for s in real if s["username"].endswith("@chatroom")]
         print(f"✅ 读得出来：{len(real)} 个会话（私聊 {len(real) - len(grp)} 个，群 {len(grp)} 个）")
         print(f"   你自己的 wxid：{self_id}")
+        for mp in sorted((wx.root / "message").glob("media_*.db")):  # 语音的音频存在这里，钥匙对不上语音就转不了字
+            if re.fullmatch(r"media_\d+\.db", mp.name):
+                try:
+                    with wx.open("message/" + mp.name) as db:
+                        db.query("SELECT 1 FROM sqlite_master LIMIT 1")
+                except Exception:
+                    print(f"⚠️ 语音库 {mp.name} 没有对得上的钥匙，语音转不了文字：在微信开着时重新取一次钥匙"
+                          "（教程 13.2），再重跑本检查。常见原因：取钥匙时这个微信还没收过语音，库是后来才建的")
         if groups:
             hit = [wx.display_name(g) for g in grp if any(k == g or k in wx.display_name(g) for k in groups)]
             print(f"   WECHAT_GROUPS 命中的群（{len(hit)} 个）：" + ("、".join(hit) or "一个都没有，检查群名"))

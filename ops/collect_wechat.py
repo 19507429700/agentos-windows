@@ -494,9 +494,60 @@ def setup(argv_check: bool) -> tuple[Wechat | None, Path | None, int]:
     return Wechat(root, keys, STATE_DIR / "wechat-cache"), root, 0
 
 
+def voice_check(wx: Wechat, sessions: list[dict], days: int = 3, limit: int = 5) -> None:
+    """排查语音转不出字：最近几条语音，在电脑微信里找不找得到音频、能不能转。py ops\\collect_wechat.py --voices"""
+    media = sorted(p.name for p in (wx.root / "message").glob("media_*.db") if re.fullmatch(r"media_\d+\.db", p.name))
+    print(f"语音库：{'、'.join(media) or '一个都没有（message 文件夹里没有 media_N.db）'}")
+    for name in media:
+        try:
+            with wx.open("message/" + name) as db:
+                n = db.query("SELECT count(*) AS n FROM VoiceInfo")[0]["n"]
+                last = db.query("SELECT svr_id FROM VoiceInfo ORDER BY rowid DESC LIMIT 1")
+            print(f"   {name}：存了 {n} 条语音的音频，最新一条的编号 {last[0]['svr_id'] if last else '—'}")
+        except Exception as e:
+            print(f"   {name}：读不了 VoiceInfo（{e}）")
+    print(f"语音模型：{'有' if (whisper_dir() / 'model.bin').exists() else '没有'}（{whisper_dir()}）")
+    start = int(time.time() - days * 86400)
+    found = []
+    for sess in sessions[:30]:
+        u = sess.get("username") or ""
+        if not u or u in SKIP_USERS or u.startswith("gh_"):
+            continue
+        for dbname in wx.message_dbs_for(u, None):
+            try:
+                rows = wx.read_new(u, dbname, 0, start, u.endswith("@chatroom"))
+            except Exception:
+                continue
+            found += [(ts, wx.display_name(u), voice) for _, ts, _, _, _, voice in rows if voice]
+    found.sort(reverse=True)
+    if not found:
+        print(f"最近 {days} 天的会话里没找到语音消息")
+        return
+    print(f"最近的 {min(limit, len(found))} 条语音（共找到 {len(found)} 条）：")
+    audio = wx.voice_audio([v for _, _, v in found[:limit]])
+    tried = False
+    for ts, chat, v in found[:limit]:
+        a = audio.get(v)
+        line = f"   {datetime.fromtimestamp(ts):%m-%d %H:%M} {chat}  编号 {v}："
+        if not a:
+            print(line + "电脑微信里没有这条的音频")
+            continue
+        line += f"有音频 {len(a)} 字节"
+        if not tried and (whisper_dir() / "model.bin").exists():
+            tried = True
+            try:
+                r = transcribe_voices({v: a}).get(v)
+                line += f"，转写结果：{voice_line(r)}"
+            except Exception as e:  # noqa: BLE001
+                line += f"，转写出错：{e}"
+        print(line)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     check, list_groups = "--check" in args, "--groups" in args
+    voices = "--voices" in args
+    check = check or voices
     # 检查时把说明打到标准输出（PowerShell 里不会被当成报错），定时采集时照常写日志
     logging.basicConfig(level=logging.INFO, stream=sys.stdout if (check or list_groups) else sys.stderr,
                         format="%(message)s" if (check or list_groups) else "%(asctime)s %(levelname)s %(message)s")
@@ -516,6 +567,9 @@ def main(argv: list[str] | None = None) -> int:
         log.error("打开微信库失败（钥匙过期？微信退出登录或更新过？）：%s", e)
         return 2
 
+    if voices:
+        voice_check(wx, sessions)
+        return 0
     if check or list_groups:
         real = [s for s in sessions if s.get("username") and s["username"] not in SKIP_USERS
                 and not s["username"].startswith("gh_")]

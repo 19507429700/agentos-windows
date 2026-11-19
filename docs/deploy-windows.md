@@ -652,6 +652,14 @@ py ops\collect_wechat.py
 - 模型没下好（显示 `⚠️ 语音模型没下好`）：多半是网络问题，过一会儿重跑安装脚本，会接着下。
 - 不想要了：`py ops\set_key.py wechat WECHAT_VOICE 0`。
 
+### 13.7 微信图片（自动）
+
+聊天里的图片，电脑微信上有的会解密存进 `spaces\me\raw\wechat\images\`，聊天记录里写成「[图片] 可看：…」：AI 能看图、图里的字能搜到，也能把图发到飞书。只有电脑微信上有的图才有。
+
+- 图片一直只有「[图片]」：运行 `py ops\collect_wechat.py --images`，它会告诉你解图片的钥匙材料找到没有、最近几张图能不能解开，把输出截图发给作者。
+- 不想要：`py ops\set_key.py wechat WECHAT_IMAGES 0`。
+- 想采所有群：`py ops\set_key.py wechat WECHAT_GROUPS 全部`。
+
 ---
 
 ## 第十四步：公众号文章

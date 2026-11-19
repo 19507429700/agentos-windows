@@ -241,6 +241,9 @@ class FakeWechat:
     def copy_file(self, *a):
         return None
 
+    def save_image(self, chat_id, svr_id, ts, raw_dir, day, self_id):
+        return f"spaces/me/raw/wechat/images/{day}/x-{svr_id}.png" if svr_id == "555" else None
+
 
 class VoiceTest(unittest.TestCase):
     """语音转文字：一个会话的语音一次取、一次转；转不了就只留「[语音]」。"""
@@ -252,10 +255,10 @@ class VoiceTest(unittest.TestCase):
         self.raw = Path(self.tmp.name) / "raw"
         self.ts = 1794802892
         self.rows = [
-            (1, self.ts, "wxid_friend", "在吗", None, ""),
-            (2, self.ts + 60, "wxid_friend", "[语音]", None, "111"),
-            (3, self.ts + 120, "wxid_me", "[语音]", None, "222"),
-            (4, self.ts + 180, "wxid_friend", "[语音]", None, "333"),  # 库里找不到音频
+            (1, self.ts, "wxid_friend", "在吗", None, "", ""),
+            (2, self.ts + 60, "wxid_friend", "[语音]", None, "111", ""),
+            (3, self.ts + 120, "wxid_me", "[语音]", None, "222", ""),
+            (4, self.ts + 180, "wxid_friend", "[语音]", None, "333", ""),  # 库里找不到音频
         ]
 
     def tearDown(self):
@@ -322,6 +325,68 @@ class VoiceTest(unittest.TestCase):
         self.assertEqual(self.cw.voice_line(None), "[语音]")
         self.assertEqual(self.cw.voice_line({"text": "好的", "sec": 13.8}), "[语音 14秒] 好的")
         self.assertEqual(self.cw.voice_line({"text": "好的", "sec": None}), "[语音] 好的")
+
+
+class ImageTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.raw = Path(self.tmp.name) / "raw"
+        self.ts = 1794802892
+        import collect_wechat
+        self.cw = collect_wechat
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_image_line_points_to_saved_file(self):
+        rows = [(1, self.ts, "wxid_friend", "[图片]", None, "", "555"),
+                (2, self.ts + 60, "wxid_friend", "[图片]", None, "", "666")]  # 本机没有这张
+        self.cw.collect_chat(FakeWechat(rows), {"username": "wxid_friend", "last_timestamp": self.ts + 100},
+                        {"chats": {}}, self.raw, 3, "wxid_me", self.ts + 300, 25, None)
+        text = "".join(p.read_text(encoding="utf-8") for p in self.raw.rglob("*.md"))
+        self.assertIn("小王：[图片] 可看：spaces/me/raw/wechat/images/2026-11-16/x-555.png", text)
+        self.assertIn("小王：[图片]\n", text)
+
+    def test_images_off(self):
+        rows = [(1, self.ts, "wxid_friend", "[图片]", None, "", "555")]
+        self.cw.collect_chat(FakeWechat(rows), {"username": "wxid_friend", "last_timestamp": self.ts + 100},
+                        {"chats": {}}, self.raw, 3, "wxid_me", self.ts + 300, 25, None, images=False)
+        text = "".join(p.read_text(encoding="utf-8") for p in self.raw.rglob("*.md"))
+        self.assertNotIn("可看", text)
+
+    def test_decode_v2_v1_and_plain(self):
+        """按同样的格式造一张加密图（V2：AES 段 + 原样段 + 异或段），能解回原图。"""
+        import hashlib, struct
+        import wechat_images as wi
+        png = b"\x89PNG\r\n\x1a\n" + bytes(range(60)) + b"IEND\xaeB`\x82"
+        acct = Path(self.tmp.name) / "xwechat_files" / "wxid_me_ab12"
+        (acct.parent.parent / "app_data" / "net" / "kvcomm").mkdir(parents=True)
+        (acct.parent.parent / "app_data" / "net" / "kvcomm" / "key_12345_1.statistic").write_text("")
+        acct.mkdir(parents=True)
+        keys = wi.candidate_keys(acct, "wxid_me")
+        key, xor = hashlib.md5(b"12345wxid_me").hexdigest()[:16].encode(), 12345 & 255
+        self.assertIn((key, xor), keys)
+
+        def enc(k, plain):
+            pad = 16 - len(plain) % 16
+            plain += bytes([pad]) * pad
+            try:
+                from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+                e = Cipher(algorithms.AES(k), modes.ECB()).encryptor()
+                return e.update(plain) + e.finalize()
+            except ImportError:
+                import subprocess
+                return subprocess.run(["/usr/bin/openssl", "enc", "-aes-128-ecb", "-nopad", "-K", k.hex()],
+                                      input=plain, capture_output=True).stdout
+
+        def build(marker, k, x_byte, a=20, x=6):
+            mid = png[a:len(png) - x]
+            return (marker + struct.pack("<II", a, x) + b"\x01" + enc(k, png[:a]) + mid
+                    + bytes(c ^ x_byte for c in png[-x:]))
+        self.assertEqual(wi.decode_dat(build(wi.V2, key, xor), keys), (png, ".png"))
+        self.assertEqual(wi.decode_dat(build(wi.V1, wi.V1_KEY, 0x37), []), (png, ".png"))
+        self.assertEqual(wi.decode_dat(bytes(c ^ 0x5A for c in png), []), (png, ".png"))  # 老格式：整体异或
+        self.assertIsNone(wi.decode_dat(build(wi.V2, b"0" * 16, 0), keys))  # 钥匙不对：解不开
 
 
 if __name__ == "__main__":

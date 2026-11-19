@@ -30,7 +30,16 @@ def day_files(day: str) -> tuple[list[str], list[str]]:
     return files, docs
 
 
-def build_prompt(day: str, files: list[str], docs: list[str], missing: list[str]) -> str:
+def day_articles(day: str) -> list[str]:
+    """当天归档的公众号文章：存在 raw/wechat/articles/（按发布日期命名，不在日期文件夹里），按归档时间挑出当天的。"""
+    folder = RAW / "wechat" / "articles"
+    if not folder.is_dir():
+        return []
+    return sorted("spaces/me/raw/" + p.relative_to(RAW).as_posix() for p in folder.glob("*.md")
+                  if p.is_file() and datetime.fromtimestamp(p.stat().st_mtime).date().isoformat() == day)
+
+
+def build_prompt(day: str, files: list[str], docs: list[str], missing: list[str], arts: list[str] | None = None) -> str:
     yesterday = (date.fromisoformat(day) - timedelta(days=1)).isoformat()
     return (f"按技能 daily-review 写 {day} 的每日复盘。\n"
             f"昨天是 {yesterday}（有 spaces/me/kb/daily/{yesterday}.md 就读它的「明天三件事」）。\n"
@@ -39,6 +48,8 @@ def build_prompt(day: str, files: list[str], docs: list[str], missing: list[str]
             f"当天新存或有更新的飞书文档和妙记（共 {len(docs)} 篇；它们多半是以前就有的，只是今天第一次读到，"
             f"别当成今天发生的事，和当天往来相关时再去读）：\n"
             f"{chr(10).join(docs) or '（无）'}\n"
+            f"当天归档的公众号文章全文（共 {len(arts or [])} 篇；聊天里只有「[公众号] 标题」一行的，正文在这里，相关时去读）：\n"
+            f"{chr(10).join(arts or []) or '（无）'}\n"
             "日程（今天起 7 天，排「明天三件事」时参考）：spaces/me/raw/feishu/日程/最近日程.md\n"
             f"没采到的来源：{' '.join(missing) or '无'}\n"
             f"全文写进 spaces/me/kb/daily/{day}.md，最后只回复那一页摘要。")
@@ -96,8 +107,9 @@ def main(argv: list[str] | None = None) -> int:
             missing.append(label)
 
     files, docs = day_files(day)
-    print(f"    当天往来 {len(files)} 个文件，新存文档和妙记 {len(docs)} 篇", flush=True)
-    r = run_py("run_agent.py", "-", stdin=build_prompt(day, files, docs, missing), timeout=2400)
+    arts = day_articles(day)
+    print(f"    当天往来 {len(files)} 个文件，新存文档和妙记 {len(docs)} 篇，公众号文章 {len(arts)} 篇", flush=True)
+    r = run_py("run_agent.py", "-", stdin=build_prompt(day, files, docs, missing, arts), timeout=2400)
     ok, summary = parse_result(r.stdout, r.returncode)
     if not ok:
         print(summary, file=sys.stderr)

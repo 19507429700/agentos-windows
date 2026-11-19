@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agentos_env import NO_WINDOW, RAW, REPO, SPACE, child_env, python  # noqa: E402
+from agentos_env import NO_WINDOW, RAW, REPO, SPACE, STATE, child_env, python, read_env  # noqa: E402
 
 DOC_RE = re.compile(r"/(文档|妙记)-")
 
@@ -82,8 +82,14 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"==> {datetime.now():%Y-%m-%d %H:%M:%S} 每日复盘 {day}", flush=True)
     missing = []
-    # 微信没取钥匙时 collect_wechat.py 安静退出 0，不算「没采到」
-    for script, label in (("collect_mail.py", "邮箱"), ("collect_feishu.py", "飞书"), ("collect_wechat.py", "微信")):
+    # 没接的来源不补采（不然没配邮箱也会报错、复盘里写「邮箱没采到」）；微信没取钥匙时 collect_wechat.py 安静退出 0
+    sources = []
+    if read_env(STATE / "mail.env").get("MAIL_PASSWORD"):
+        sources.append(("collect_mail.py", "邮箱"))
+    if (STATE / "feishu_user_token.json").exists():
+        sources.append(("collect_feishu.py", "飞书"))
+    sources.append(("collect_wechat.py", "微信"))
+    for script, label in sources:
         r = run_py(script, timeout=600)
         print((r.stdout + r.stderr).strip(), flush=True)
         if r.returncode != 0:

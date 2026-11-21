@@ -565,10 +565,10 @@ py ops\push_kb.py
 在项目文件夹里：
 
 ```powershell
-git pull --no-edit upstream main
+git pull --no-rebase --no-edit upstream main
 ```
 
-`--no-edit` 的意思：你这边有自己的提交（比如每天 03:00 的知识库备份）时，拉更新要把两边合并，git 会自动写好合并说明，不再弹出编辑器。万一还是进了一个满屏 `~` 的编辑器，按 `Esc`，输入 `:wq`，回车就出来了。
+`--no-rebase` 的意思：你这边有知识库备份的提交、模板也有新提交时，用「合并」的方式把两边接起来（不加的话新版 git 会报「Need to specify how to reconcile divergent branches」）。`--no-edit` 的意思：你这边有自己的提交（比如每天 03:00 的知识库备份）时，拉更新要把两边合并，git 会自动写好合并说明，不再弹出编辑器。万一还是进了一个满屏 `~` 的编辑器，按 `Esc`，输入 `:wq`，回车就出来了。
 
 ### 13.2 取微信的钥匙
 
@@ -731,7 +731,7 @@ $env:IFLYREC_WINDOW_DAYS=3650; $env:IFLYREC_MAX_PER_RUN=200; py ops\collect_ifly
 2. **拉更新**，在项目文件夹里：
 
 ```powershell
-git pull --no-edit upstream main
+git pull --no-rebase --no-edit upstream main
 ```
 
 3. **重新授权**：
@@ -773,7 +773,7 @@ py ops\deploy.py
 - **拉更新**（模板有新版本时）：
 
 ```powershell
-git pull --no-edit upstream main
+git pull --no-rebase --no-edit upstream main
 ```
 
 ```powershell

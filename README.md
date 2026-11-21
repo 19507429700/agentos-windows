@@ -42,7 +42,7 @@ ops\windows\          安装脚本 install.ps1、识字脚本 ocr.ps1
 - 填或改钥匙：`py ops\set_key.py <bridge|mail|agent|healthchecks> <名字> [值]`
 - 检查底座：`py ops\check_agent.py`
 - 重启飞书机器人：`py ops\deploy.py`
-- 拉更新：`git pull --no-edit upstream main`，再 `py ops\deploy.py`
+- 拉更新：`git pull --no-rebase --no-edit upstream main`，再 `py ops\deploy.py`
 - 手动补写某天的复盘：`py ops\daily_review.py 2026-11-09`
 - 手动备份知识库：`py ops\push_kb.py`
 - 离线测试：`py -m unittest ops\test_windows.py ops\test_extract_text.py ops\test_d2.py`

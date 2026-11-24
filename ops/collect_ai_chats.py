@@ -1,9 +1,9 @@
-"""本机 WorkBuddy / Claude Code / Codex 可见对话增量采集，仅用标准库。
+"""本机 WorkBuddy / Claude Code / Codex / Grok Bot 可见对话增量采集。
 
 python ops/collect_ai_chats.py [--check] [--since YYYY-MM-DD]
 配置 ~/.agentos/ai_chats.json（可选）：enabled、initial_days（默认30）、
 roots（平台到目录列表）、exclude_sessions（会话ID）、exclude_cwds（目录列表）。
-只读本机 projects/sessions JSONL，不读账号凭据，不采思考、工具及系统消息。
+只读适配的本机会话JSONL与Grok Bot缓存，不读账号凭据，不采思考、工具及系统消息。
 输出 raw/ai/<消息实际日期>/<平台>-<会话摘要ID>.md；首次回填不会冒充今日活动。
 """
 from __future__ import annotations
@@ -19,6 +19,9 @@ import re
 import sqlite3
 import sys
 
+from ai_chat_local import (SNAPSHOT_SOURCES, default_snapshot_roots, find_snapshots,
+                           native_path, read_snapshot, snapshot_events)
+
 HOME = Path.home()
 REPO = Path(__file__).resolve().parent.parent
 STATE = Path(os.environ.get('AGENTOS_STATE_DIR', HOME / '.agentos'))
@@ -27,7 +30,8 @@ TZ = timezone(timedelta(hours=8))
 CODEX_HOME = Path(os.path.expandvars(os.environ.get('CODEX_HOME', str(HOME/'.codex')))).expanduser()
 DEFAULT_ROOTS = {'workbuddy': [str(HOME/'.workbuddy/projects')],
                  'claude': [str(HOME/'.claude/projects')],
-                 'codex': [str(CODEX_HOME/'sessions'), str(CODEX_HOME/'archived_sessions')]}
+                 'codex': [str(CODEX_HOME/'sessions'), str(CODEX_HOME/'archived_sessions')],
+                 **default_snapshot_roots(HOME, STATE)}
 TEXT_TYPES = {'text', 'input_text', 'output_text'}
 CONTEXT_TAGS = ('environment_context', 'permissions_instructions', 'system-reminder',
                 'in-app-browser-context', 'send_user_message_question_reply')
@@ -167,8 +171,48 @@ def open_db(path):
         CREATE TABLE IF NOT EXISTS messages(src TEXT, session TEXT, id TEXT, at TEXT, day TEXT,
         role TEXT, text TEXT, PRIMARY KEY(src,session,id));
         CREATE INDEX IF NOT EXISTS messages_day ON messages(day);
+        CREATE TABLE IF NOT EXISTS collection_windows(path TEXT PRIMARY KEY, since TEXT);
         CREATE TABLE IF NOT EXISTS dirty(src TEXT, session TEXT, day TEXT, PRIMARY KEY(src,session,day));''')
     return db
+
+
+def collect_snapshot(db, src, path, since, cfg):
+    """Changed desktop cache snapshots are re-read; message IDs make this idempotent.
+
+    Cache eviction is not deletion of archived history. Source history completeness
+    cannot be inferred from the presence of a desktop cache.
+    """
+    st = path.stat()
+    key = src + ':' + str(path)
+    old = db.execute('SELECT mtime,size FROM files WHERE path=?', (key,)).fetchone()
+    window = db.execute('SELECT since FROM collection_windows WHERE path=?', (key,)).fetchone()
+    if old == (st.st_mtime_ns, st.st_size) and window and since >= window[0]:
+        return 0, 0
+    data = read_snapshot(path)
+    # Validate the whole structure before recording progress, including empty caches.
+    events = list(snapshot_events(src, data, path))
+    added = 0
+    for event in events:
+        if event['session'] in cfg['exclude_sessions']:
+            continue
+        dt = timestamp(event.get('timestamp'))
+        text = clean_text(visible_text(event.get('content')))
+        if not dt or not text or dt.date().isoformat() < since:
+            continue
+        eid = event.get('id') or hashlib.sha256((dt.isoformat()+event['role']+text).encode()).hexdigest()
+        row = (src, event['session'], str(eid), dt.isoformat(timespec='microseconds'),
+               dt.date().isoformat(), event['role'], text)
+        old_msg = db.execute('SELECT at,day,role,text FROM messages WHERE src=? AND session=? AND id=?', row[:3]).fetchone()
+        if old_msg == row[3:]:
+            continue
+        db.execute('INSERT OR REPLACE INTO messages VALUES(?,?,?,?,?,?,?)', row)
+        db.execute('INSERT OR IGNORE INTO dirty VALUES(?,?,?)', (src,row[1],row[4]))
+        if old_msg:
+            db.execute('INSERT OR IGNORE INTO dirty VALUES(?,?,?)', (src,row[1],old_msg[1]))
+        added += 1
+    db.execute('INSERT OR REPLACE INTO files VALUES(?,?,?,?,?)', (key,0,'snapshot-v1',st.st_mtime_ns,st.st_size))
+    db.execute('INSERT OR REPLACE INTO collection_windows VALUES(?,?)', (key,min(since,window[0]) if window else since))
+    return added, 0
 
 
 def collect_file(db, src, path, since, cfg):
@@ -180,6 +224,9 @@ def collect_file(db, src, path, since, cfg):
         return 0, 0
     key = str(path.resolve())
     old = db.execute('SELECT offset,prefix,mtime,size FROM files WHERE path=?', (key,)).fetchone()
+    window = db.execute('SELECT since FROM collection_windows WHERE path=?', (key,)).fetchone()
+    if not window or since < window[0]:
+        old = None  # A wider requested history window must re-read previously skipped messages.
     with path.open('rb') as f:
         prefix = hashlib.sha256(f.read(min(256, old[0] if old else st.st_size))).hexdigest()
         if old and old[2:] == (st.st_mtime_ns, st.st_size):
@@ -240,6 +287,7 @@ def collect_file(db, src, path, since, cfg):
     if auto:
         offset = 0
     db.execute('INSERT OR REPLACE INTO files VALUES(?,?,?,?,?)', (key,offset,prefix,st.st_mtime_ns,st.st_size))
+    db.execute('INSERT OR REPLACE INTO collection_windows VALUES(?,?)', (key,min(since,window[0]) if window else since))
     return added, bad
 
 
@@ -298,30 +346,39 @@ def main(argv=None):
     since=args.since or (datetime.now(TZ)-timedelta(days=int(cfg['initial_days']))).date().isoformat()
     datetime.fromisoformat(since)
     roots=configured_roots(cfg)
-    found={src:sorted({p for root in paths if root.is_dir() for p in root.rglob('*.jsonl') if p.is_file()}) for src,paths in roots.items()}
+    found={}
+    for src,paths in roots.items():
+        if src in SNAPSHOT_SOURCES:
+            found[src] = sorted({p for root in paths for p in find_snapshots(src,root)})
+        else:
+            found[src] = sorted({p for root in paths if root.is_dir() for p in root.rglob('*.jsonl') if p.is_file()})
     if args.check:
         print(json.dumps({'since':since,'platform_files':{k:len(v) for k,v in found.items()},
-            'roots':{src:[{'path':str(p),'exists':p.is_dir()} for p in paths] for src,paths in roots.items()},
-            'note':'文件数不等于有效聊天数；Claude 中 AgentOS 自己的 SDK 后台记录会排除。'},ensure_ascii=False));return 0
+            'roots':{src:[{'path':str(p),'exists':native_path(p).is_dir()} for p in paths] for src,paths in roots.items()},
+            'note':'文件数不等于有效聊天数；Claude Code 中 AgentOS 自己的 SDK 后台记录会排除。Grok Bot 仅本机已缓存内容，不登录网页，不保证完整历史。'},ensure_ascii=False));return 0
     with lock():
         db=open_db(STATE/'ai_chats.db')
         try:
+            failed = False
             for src,files in found.items():
                 added=bad=errors=0
                 for path in files:
                     try:
                         with db:
-                            a,b=collect_file(db,src,path,since,cfg);added+=a;bad+=b
-                    except (OSError,sqlite3.Error):
+                            collector = collect_snapshot if src in SNAPSHOT_SOURCES else collect_file
+                            a,b=collector(db,src,path,since,cfg);added+=a;bad+=b
+                    except (OSError,ValueError,sqlite3.Error) as exc:
+                        label = hashlib.sha256(str(path).encode()).hexdigest()[:12]
+                        print(f'{src}: 读取失败 文件标识 {label}，类型 {type(exc).__name__}（目录权限、缓存写入或格式版本）',file=sys.stderr)
                         errors+=1
                 with db:
                     rendered=render_dirty(db,RAW)
                 print(f'{src}: 会话文件 {len(files)}，新增/更新消息 {added}，归档 {rendered}，损坏行 {bad}，读取失败 {errors}')
                 if bad or errors:
-                    return 1
+                    failed = True
         finally:
             db.close()
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == '__main__':

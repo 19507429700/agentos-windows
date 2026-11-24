@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TEXT_SUFFIXES = {".md", ".txt", ".json", ".csv", ".eml"}
 MAX_FILE_BYTES = 5 * 1024 * 1024
 DAY_RE = re.compile(r"/(\d{4}-\d{2}-\d{2})/")
-SOURCES = ("mail", "feishu", "wechat", "iflyrec", "inbox", "kb")
+SOURCES = ("mail", "feishu", "wechat", "iflyrec", "inbox", "ai", "kb")
 
 
 def space_dir(space: str) -> Path:

@@ -249,6 +249,8 @@ if (Test-Path (Join-Path $State "iflyrec-skill\scripts\recording_assistant.py"))
     Install-Job "collect-iflyrec" 8 (Every10) @($jobPy, "`"$ops\collect_iflyrec.py`"")
 } else { Say "    跳过讯飞录音笔：没用的话不用管；要接就先运行 py ops\install_iflyrec.py（教程第十五步）" }
 
+Install-Job "collect-ai" 8 (Every10) @($jobPy, "`"$ops\collect_ai_chats.py`"")
+
 Install-Job "extract-text" 8 (Every10) @($jobPy, "`"$ops\extract_text.py`"")
 
 if (Has-Value $bridgeEnv "OWNER_OPEN_ID") {

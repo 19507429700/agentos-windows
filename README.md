@@ -6,7 +6,7 @@
 
 本地AI对话（WorkBuddy、Claude Code、Codex、Grok Bot）采集与更新见 [docs/ai-chats.md](docs/ai-chats.md)。Grok Bot仅读取已缓存到本机的文字和语音转写。
 
-团队成员之间互查 AI 聊天进度（经 Tailscale，按人授权、可撤销）见 [docs/team.md](docs/team.md)。
+团队成员之间互查 AI 聊天进度（经 Tailscale，全团队统一规则，每人一条命令打开）见 [docs/team.md](docs/team.md)。
 
 ## 它在 Windows 上怎么跑
 

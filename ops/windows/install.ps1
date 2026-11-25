@@ -208,7 +208,7 @@ if ((Has-Value $bridgeEnv "FEISHU_APP_ID") -and (Has-Value $bridgeEnv "FEISHU_AP
     Say "    跳过飞书机器人：bridge.env 里还没填 FEISHU_APP_ID / FEISHU_APP_SECRET"
 }
 
-# 团队互查：本人用 team_chat_server.py grant 授权过别人（docs/team.md）才装。
+# 团队互查：本人用 team_chat_server.py on 打开过共享（docs/team.md）才装。
 # 登录后一直开着，只在本机 127.0.0.1:8765 上提供只读查询，由 Tailscale Serve 转给团队网络里的人
 $teamCfg = Join-Path $State "team-sharing.json"
 $teamOn = $false
@@ -227,7 +227,7 @@ if ($teamOn) {
         Say "    ✅ AgentOS-TeamChat（团队互查服务，已启动；日志 $Logs\team-chat.log）"
     }
 } else {
-    Say "    跳过团队互查服务：还没授权给别人（要用的话看 docs\team.md）"
+    Say "    跳过团队互查服务：还没打开共享（要用的话看 docs\team.md）"
 }
 
 $mailEnv = Join-Path $State "mail.env"

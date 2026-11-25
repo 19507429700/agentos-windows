@@ -106,6 +106,8 @@ def clean_text(text):
     text = re.sub(r'<send_user_message_question_reply>\s*(.*?)\s*</send_user_message_question_reply>', answer, text, flags=re.S)
     for tag in CONTEXT_TAGS:
         text = re.sub(rf'<{tag}\b[^>]*>.*?</{tag}>', '', text, flags=re.S|re.I)
+    # WorkBuddy 把用户原话包在 <user_query> 里：只去掉标签，保留原话。
+    text = re.sub(r'</?user_query>', '', text)
     text = re.sub(r'<(?:system|developer|system_instruction|tool_result)\b[^>]*>.*?</(?:system|developer|system_instruction|tool_result)>', '', text, flags=re.S|re.I)
     # 常见凭据只在转存文本里脱敏；从不读取独立凭据配置。
     text = re.sub(r'\b(?:sk-|ghp_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]{12,}', '[凭据已隐藏]', text)

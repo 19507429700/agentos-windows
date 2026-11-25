@@ -99,6 +99,12 @@ class TeamChatTest(unittest.TestCase):
             self.assertIn('jiaxu：grokbot（1 个会话）；最近 7 天',text)
             self.assertNotIn(cfg['clients']['jiaxu']['token_sha256'],text)
             server.main(['revoke','--client','jiaxu']);self.assertEqual(server.read_json(config)['clients'],{})
+    def test_session_titles_strip_wrappers(self):
+        self.assertEqual(server.title_of('<user_query>帮我改周报</user_query>'),'帮我改周报')
+        self.assertEqual(server.title_of('<user_query>@"D:/a/b/说明.pdf" 存到飞书</user_query>'),'@说明.pdf 存到飞书')
+        self.assertEqual(server.title_of('# Files mentioned by the user:\n## a.py\n## My request for Codex:\n修登录'),'修登录')
+        self.assertEqual(server.title_of('The following is the Codex agent history\n...'),'')
+        self.assertEqual(ai.clean_text('<user_query>原话</user_query>'),'原话')
     def test_bot_rules_allow_only_the_query_command(self):
         repo=Path(__file__).resolve().parent.parent
         cfg=json.loads((repo/'.claude/settings.json').read_text(encoding='utf-8-sig'))

@@ -176,12 +176,28 @@ def session_rows(path):
         return db.execute('SELECT src,session,count(*),max(at) FROM messages GROUP BY src,session ORDER BY max(at) DESC').fetchall()
 
 
+CODEX_WRAPPERS=('The following is the Codex agent history','# Files mentioned by the user','# Context from my IDE')
+
+
+def title_of(text):
+    """会话标题：本人原话的前 40 字；去掉软件自动加的包装。"""
+    text=re.sub(r'</?user_query>','',text)
+    m=re.search(r'##\s*My request for Codex:\s*(.*)',text,re.S)
+    if m:text=m.group(1)
+    elif text.lstrip().startswith(CODEX_WRAPPERS):return ''
+    text=re.sub(r'@"[^"]*[\\/]([^"\\/]+)"',r'@\1',text)  # 附件只留文件名
+    return ' '.join(text.split())[:40]
+
+
 def session_titles(path):
     """每个会话里本人说的第一句话，只给本人在终端挑会话用，不经过查询接口。"""
+    titles={}
     with closing(connect_records(path)) as db:
-        rows=db.execute("SELECT src,session,text FROM messages m WHERE role='user' AND at=(SELECT min(at) FROM messages "
-                        "WHERE src=m.src AND session=m.session AND role='user')").fetchall()
-    return {(src,sid):' '.join(text.split())[:40] for src,sid,text in rows}
+        for src,sid,text in db.execute("SELECT src,session,text FROM messages WHERE role='user' ORDER BY src,session,at"):
+            if (src,sid) not in titles:
+                title=title_of(text)
+                if title:titles[src,sid]=title
+    return titles
 
 
 def describe(cfg):
@@ -220,7 +236,7 @@ def main(argv=None):
         records=STATE/'ai_chats.db';titles=session_titles(records)
         rows=[r for r in session_rows(records) if args.platform in (None,r[0])]
         for src,sid,count,at in rows[:max(1,args.limit)]:
-            print(src+'  '+opaque(sid)+'  '+str(count)+'条  最近 '+at[:16].replace('T',' ')+'  开头：'+titles.get((src,sid),'（没有本人消息）'))
+            print(src+'  '+opaque(sid)+'  '+str(count)+'条  最近 '+at[:16].replace('T',' ')+'  开头：'+titles.get((src,sid),'（看不出开头，可在原软件里按时间对照）'))
         if len(rows)>args.limit:print('……还有 '+str(len(rows)-args.limit)+' 个会话，加 --limit 100 看更多，或 --platform 只看一个软件')
         print('只给某几个会话：grant 时用 --session 编号（上面第二列），可写多个')
     elif args.cmd=='status':

@@ -176,11 +176,33 @@ def session_rows(path):
         return db.execute('SELECT src,session,count(*),max(at) FROM messages GROUP BY src,session ORDER BY max(at) DESC').fetchall()
 
 
+def session_titles(path):
+    """每个会话里本人说的第一句话，只给本人在终端挑会话用，不经过查询接口。"""
+    with closing(connect_records(path)) as db:
+        rows=db.execute("SELECT src,session,text FROM messages m WHERE role='user' AND at=(SELECT min(at) FROM messages "
+                        "WHERE src=m.src AND session=m.session AND role='user')").fetchall()
+    return {(src,sid):' '.join(text.split())[:40] for src,sid,text in rows}
+
+
+def describe(cfg):
+    lines=['名字：'+cfg.get('name','')+'；共享：'+('开' if cfg.get('enabled') else '关')]
+    clients=cfg.get('clients',{})
+    if not clients:lines.append('还没有授权给任何人。')
+    for name,grant in clients.items():
+        scope=[]
+        for src,sessions in grant.get('platforms',{}).items():
+            scope.append(src+('（全部会话，含以后新增的）' if '*' in sessions else '（'+str(len(sessions))+' 个会话）'))
+        lines.append('- '+name+'：'+'、'.join(scope)+'；最近 '+str(grant.get('days'))+' 天')
+    return '\n'.join(lines)
+
+
 def main(argv=None):
     ap=argparse.ArgumentParser(description=__doc__)
     sub=ap.add_subparsers(dest='cmd',required=True)
     init=sub.add_parser('init');init.add_argument('--name',required=True)
-    sub.add_parser('sessions')
+    ses=sub.add_parser('sessions');ses.add_argument('--platform',choices=PLATFORMS)
+    ses.add_argument('--limit',type=int,default=30)
+    sub.add_parser('status')
     serve=sub.add_parser('serve');serve.add_argument('--port',type=int,default=8765)
     grant=sub.add_parser('grant');grant.add_argument('--client',required=True)
     grant.add_argument('--url',required=True);grant.add_argument('--platform',required=True,choices=PLATFORMS,action='append')
@@ -195,8 +217,14 @@ def main(argv=None):
         private_json(CONFIG,{'name':args.name,'enabled':False,'clients':{}})
         print('已创建配置，默认关闭共享。下一步 sessions 选择会话，然后 grant。')
     elif args.cmd=='sessions':
-        for src,sid,count,at in session_rows(STATE/'ai_chats.db'):
-            print(json.dumps({'platform':src,'session':opaque(sid),'messages':count,'latest':at},ensure_ascii=False))
+        records=STATE/'ai_chats.db';titles=session_titles(records)
+        rows=[r for r in session_rows(records) if args.platform in (None,r[0])]
+        for src,sid,count,at in rows[:max(1,args.limit)]:
+            print(src+'  '+opaque(sid)+'  '+str(count)+'条  最近 '+at[:16].replace('T',' ')+'  开头：'+titles.get((src,sid),'（没有本人消息）'))
+        if len(rows)>args.limit:print('……还有 '+str(len(rows)-args.limit)+' 个会话，加 --limit 100 看更多，或 --platform 只看一个软件')
+        print('只给某几个会话：grant 时用 --session 编号（上面第二列），可写多个')
+    elif args.cmd=='status':
+        print(describe(read_json(CONFIG)) if CONFIG.exists() else '还没有 init，没有共享任何内容。')
     elif args.cmd=='grant':
         if not re.fullmatch(r'[A-Za-z0-9_-]{1,40}',args.client):raise ValueError('client 请用1–40位英文字母、数字、下划线或短横线')
         if not 1<=args.days<=90:raise ValueError('days 范围1–90')
@@ -216,7 +244,8 @@ def main(argv=None):
         private_json(CONFIG,cfg)
         invitation=STATE/'team-invitations'/(args.client+'.json')
         private_json(invitation,{'schema':'agentos.peer.v1','name':cfg['name'],'url':url,'token':token})
-        print('授权已生效。邀请文件含访问密钥，仅交给该成员：'+str(invitation))
+        print('授权已生效：'+describe({'name':cfg['name'],'enabled':True,'clients':{args.client:cfg['clients'][args.client]}}).split('\n')[1][2:])
+        print('邀请文件含访问密钥，只私下交给该成员：'+str(invitation))
     elif args.cmd=='revoke':
         cfg=read_json(CONFIG);cfg.get('clients',{}).pop(args.client,None);private_json(CONFIG,cfg)
         print('已撤销，该成员的旧邀请立即失效。已被对方保存的内容不会远程删除。')

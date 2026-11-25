@@ -89,6 +89,15 @@ class TeamChatTest(unittest.TestCase):
             self.assertIn('张三',server.read_json(peers))
             cfg=server.read_json(config);self.assertTrue(cfg['enabled'])
             self.assertNotIn('token',cfg['clients']['jiaxu'])
+            import io,contextlib
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out):
+                server.main(['sessions','--platform','grokbot']);server.main(['status'])
+            text=out.getvalue()
+            self.assertIn('开头：消息去重需要处理幂等键',text)
+            self.assertNotIn('PRIVATE_PLATFORM',text)
+            self.assertIn('jiaxu：grokbot（1 个会话）；最近 7 天',text)
+            self.assertNotIn(cfg['clients']['jiaxu']['token_sha256'],text)
             server.main(['revoke','--client','jiaxu']);self.assertEqual(server.read_json(config)['clients'],{})
     def test_bot_rules_allow_only_the_query_command(self):
         repo=Path(__file__).resolve().parent.parent

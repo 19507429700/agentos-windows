@@ -99,13 +99,13 @@ py ops\team_chat_server.py grant --client zhangsan --url "https://你的电脑�
 ```
 
 - `init` 只运行一次，`--name` 是对方查你时看到的名字。
-- `sessions` 列出你有哪些会话，用来确认确实采到了数据。
+- `sessions` 列出你最近的会话，每行是「软件、会话编号、条数、最近时间、你说的第一句话」，用来确认采到了数据、挑要给的会话。会话多就加 `--platform grokbot` 只看一个软件，或 `--limit 100` 看更多。这个列表只在你自己的终端里显示，不会发给别人。
 - `grant` 里面：
   - `--client` 填对方的英文代号；
   - `--url` 填第三步拿到的**你自己的**地址；
   - `--platform` 只写你愿意共享的软件：`grokbot`、`workbuddy`、`claude`（Claude Code）、`codex`，可以写多个；
   - `--days 7` 表示对方最多只能查最近 7 天。
-- 只想给某几个会话、不想给整个软件：把 `--all-sessions` 换成 `--session 会话编号`，编号从 `sessions` 的输出里抄。
+- 只想给某几个会话、不想给整个软件：把 `--all-sessions` 换成 `--session 会话编号`，编号是 `sessions` 输出的第二列，多个就写多次 `--session`。
 - `--all-sessions` 包括以后新采到的会话。
 - 对同一个人再运行一次 `grant`，会**替换**之前的授权、换一把新钥匙，旧的邀请文件立刻失效，要重新发给他。
 
@@ -202,6 +202,13 @@ powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 ## 日常
 
 - **加一个新成员**：新成员做第一到第三步。然后你们两个人互相做第四到第六步，每个人用不同的 `--client`，邀请文件分开发。不需要动机器人。
+- **看自己现在给了谁、给了什么**：
+
+```powershell
+py ops\team_chat_server.py status
+```
+
+  会列出每个人能查的软件、会话数和天数。钥匙不会显示出来。
 - **撤销某人**：运行下面这条，立刻生效，不用重启。已经被对方看过、存下来的内容收不回来。
 
 ```powershell
@@ -209,6 +216,18 @@ py ops\team_chat_server.py revoke --client zhangsan
 ```
 
 - **改授权范围**：对同一个 `--client` 重新 `grant`。会换新钥匙，新的邀请文件要重新发给他，他重新 `add-peer`。
+- **暂停共享，谁都不让查**（重启电脑也不会自己恢复）：
+
+```powershell
+Disable-ScheduledTask -TaskName AgentOS-TeamChat; Stop-ScheduledTask -TaskName AgentOS-TeamChat
+```
+
+  恢复：
+
+```powershell
+Enable-ScheduledTask -TaskName AgentOS-TeamChat; Start-ScheduledTask -TaskName AgentOS-TeamChat
+```
+
 - **电脑要一直能被查**：插电、不睡眠（安装脚本已经设过），Tailscale 开着 Run unattended。
 
 ## 排错

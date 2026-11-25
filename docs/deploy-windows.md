@@ -764,23 +764,22 @@ powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 - **日志**都在 `C:\Users\你的用户名\.agentos\logs\`：`bridge.log`（机器人）、`collect-mail.log`、`daily-review.log` 等。
   用 PowerShell 看日志要加 `-Encoding UTF8`，不然中文是乱码，比如 `Get-Content $HOME\.agentos\logs\bridge.log -Tail 50 -Encoding UTF8`；用记事本打开也可以。
 - **机器人没反应**：先看 `bridge.log` 最后几行；再跑 `py ops\check_agent.py` 看底座通不通。
-- **重启机器人**（改了代码、拉了更新之后）：
-
-```powershell
-py ops\deploy.py
-```
-
-- **拉更新**（模板有新版本时）：
+- **拉更新**（模板有新版本时），**每次都是这两条**：
 
 ```powershell
 git pull --no-rebase --no-edit upstream main
 ```
 
 ```powershell
-py ops\deploy.py
+powershell -ExecutionPolicy Bypass -File ops\windows\install.ps1
 ```
 
-  如果更新里加了新的定时任务，再运行一次安装脚本。
+  第二条是重跑安装脚本，可以放心重复运行：新加的 Python 包会装上，新加的定时任务会装上，飞书机器人也会重启、换上新代码。已经装好的部分原样保留，配置、钥匙、知识库都不动。你不用自己判断这次更新改了什么。
+- **只重启飞书机器人**（改了 bridge.env 里的设置、机器人卡住时），这条更快：
+
+```powershell
+py ops\deploy.py
+```
 - **电脑重启后**：要**登录一次 Windows**，机器人和定时任务才会开始跑。
 - **钥匙失效**（机器人突然不回、复盘写不出来）：回第四步重新填，再跑 `check_agent.py`。
 - **安装脚本最后说「有 N 个定时任务没装上」**（或者报 `Register-ScheduledTask : 拒绝访问`）：那几个任务以前是在「管理员」PowerShell 里装的，普通 PowerShell 改不了。照脚本最后打印的命令，在「终端(管理员)」里删掉它们，再回普通 PowerShell 重跑安装脚本。脚本不会因为这个停下，其他任务照装。

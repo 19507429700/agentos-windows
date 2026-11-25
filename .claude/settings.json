@@ -7,7 +7,8 @@
       "WebSearch",
       "WebFetch",
       "Bash(python ops/search.py *)",
-      "Bash(python ops/make_doc.py *)"
+      "Bash(python ops/make_doc.py *)",
+      "Bash(python ops/team_chat_query.py *)"
     ],
     "deny": [
       "Read(~/.agentos/**)",

@@ -812,3 +812,7 @@ py ops\deploy.py
 ## 可选：本地AI聊天记录（含Grok Bot）
 
 按[本地AI对话教程](ai-chats.md)接入WorkBuddy、Claude Code、Codex及Grok Bot。已有AgentOS-collect-ai任务的用户拉取更新后沿用原任务，Grok Bot不需要额外账号授权或新任务；没有该任务时按该教程注册一次。只采本机已保存的兼容内容，不登录网页，也不代表平台全量历史。Windows有真实缓存验证，Mac候选路径仍需实机核对。
+
+## 可选：团队互查（在飞书里问同事和 AI 聊到哪了）
+
+几个人各自装好 AgentOS 后，可以互相授权，在自己的飞书里查对方的本地 AI 聊天进度。按 [团队互查教程](team.md) 做：加入同一个 Tailscale 网络 → 开出查询地址 → 授权、交换邀请 → 终端查通 → 飞书提问 → 后台运行。

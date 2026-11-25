@@ -208,6 +208,28 @@ if ((Has-Value $bridgeEnv "FEISHU_APP_ID") -and (Has-Value $bridgeEnv "FEISHU_AP
     Say "    跳过飞书机器人：bridge.env 里还没填 FEISHU_APP_ID / FEISHU_APP_SECRET"
 }
 
+# 团队互查：本人用 team_chat_server.py grant 授权过别人（docs/team.md）才装。
+# 登录后一直开着，只在本机 127.0.0.1:8765 上提供只读查询，由 Tailscale Serve 转给团队网络里的人
+$teamCfg = Join-Path $State "team-sharing.json"
+$teamOn = $false
+if (Test-Path $teamCfg) {
+    try { $teamOn = [bool]((Get-Content $teamCfg -Raw -Encoding UTF8 | ConvertFrom-Json).enabled) } catch { $teamOn = $false }
+}
+if ($teamOn) {
+    $action = New-ScheduledTaskAction -Execute $Pyw -Argument ("-X utf8 `"" + (Join-Path $Repo "ops\team_chat_server.py") + "`" serve") -WorkingDirectory $Repo
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $me
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
+    $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
+    if (Register-Job "AgentOS-TeamChat" $action $trigger $principal $settings) {
+        Stop-ScheduledTask -TaskName "AgentOS-TeamChat" -ErrorAction SilentlyContinue
+        Start-ScheduledTask -TaskName "AgentOS-TeamChat"
+        Say "    ✅ AgentOS-TeamChat（团队互查服务，已启动；日志 $Logs\team-chat.log）"
+    }
+} else {
+    Say "    跳过团队互查服务：还没授权给别人（要用的话看 docs\team.md）"
+}
+
 $mailEnv = Join-Path $State "mail.env"
 if (Has-Value $mailEnv "MAIL_PASSWORD") {
     Say "    测试邮箱登录……"

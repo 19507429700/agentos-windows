@@ -105,6 +105,8 @@ class TeamChatTest(unittest.TestCase):
         self.assertEqual(server.title_of('# Files mentioned by the user:\n## a.py\n## My request for Codex:\n修登录'),'修登录')
         self.assertEqual(server.title_of('The following is the Codex agent history\n...'),'')
         self.assertEqual(ai.clean_text('<user_query>原话</user_query>'),'原话')
+        self.assertEqual(server.title_of('<turn_aborted>The user interrupted</turn_aborted>\n接着改'),'接着改')
+        self.assertEqual(ai.clean_text('<turn_aborted>x</turn_aborted>'),'')
     def test_bot_rules_allow_only_the_query_command(self):
         repo=Path(__file__).resolve().parent.parent
         cfg=json.loads((repo/'.claude/settings.json').read_text(encoding='utf-8-sig'))

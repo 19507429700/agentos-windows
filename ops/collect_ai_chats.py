@@ -34,7 +34,8 @@ DEFAULT_ROOTS = {'workbuddy': [str(HOME/'.workbuddy/projects')],
                  **default_snapshot_roots(HOME, STATE)}
 TEXT_TYPES = {'text', 'input_text', 'output_text'}
 CONTEXT_TAGS = ('environment_context', 'permissions_instructions', 'system-reminder',
-                'in-app-browser-context', 'send_user_message_question_reply')
+                'in-app-browser-context', 'send_user_message_question_reply',
+                'turn_aborted')
 
 
 def load_config():

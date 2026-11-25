@@ -182,6 +182,7 @@ CODEX_WRAPPERS=('The following is the Codex agent history','# Files mentioned by
 def title_of(text):
     """会话标题：本人原话的前 40 字；去掉软件自动加的包装。"""
     text=re.sub(r'</?user_query>','',text)
+    text=re.sub(r'<turn_aborted\b[^>]*>.*?</turn_aborted>','',text,flags=re.S)
     m=re.search(r'##\s*My request for Codex:\s*(.*)',text,re.S)
     if m:text=m.group(1)
     elif text.lstrip().startswith(CODEX_WRAPPERS):return ''

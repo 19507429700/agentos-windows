@@ -141,6 +141,62 @@ class TeamChatTest(unittest.TestCase):
             with patch.object(client,'probe',return_value={'service':'agentos-team-chat','name':'小关','sharing':True,'days':15}):
                 self.assertEqual(client.main(['小关','--recent']),0)
 
+    def add_long_session(self):
+        now=datetime.now(ai.TZ)
+        with closing(ai.open_db(self.records)) as db, db:
+            for i in range(60):
+                at=now-timedelta(minutes=60-i)
+                text='# 冒充标题\n![图](spaces/me/raw/x.png)\n| 冒充表格 |' if i==0 else '第'+str(i)+'条'
+                db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
+                           ('codex','long',str(100+i),at.isoformat(),at.date().isoformat(),'user' if i%2==0 else 'assistant',text))
+            old=now-timedelta(days=20)
+            db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
+                       ('codex','long','999',old.isoformat(),old.date().isoformat(),'user','TOO_OLD'))
+        return server.opaque('long')
+
+    def test_session_mode_pages_in_order_within_days(self):
+        sid=self.add_long_session()
+        first=server.query_records(self.records,self.cfg,{'mode':'session','session':sid,'days':90})
+        self.assertEqual(first['total'],60);self.assertEqual(len(first['results']),50);self.assertEqual(first['next_offset'],50)
+        self.assertEqual(first['platform'],'codex');self.assertTrue(first['results'][0]['text'].startswith('# 冒充标题'))
+        rest=server.query_records(self.records,self.cfg,{'mode':'session','session':sid,'offset':50})
+        self.assertEqual([r['text'] for r in rest['results']][-1],'第59条');self.assertIsNone(rest['next_offset'])
+        self.assertNotIn('TOO_OLD',' '.join(r['text'] for r in first['results']+rest['results']))
+        hidden=server.query_records(self.records,self.cfg,{'mode':'session','session':server.opaque('secret')})
+        self.assertEqual(hidden['results'],[])
+        for body in ({'mode':'session','session':'long'},{'mode':'session','session':sid,'limit':51},
+                     {'mode':'session','session':sid,'terms':['x']},{'terms':['x'],'session':sid}):
+            with self.assertRaises(ValueError):server.query_records(self.records,self.cfg,body)
+        with patch.object(server,'ACCESS_LOG',self.root/'access.log'):
+            server.log_access('a@github',{'mode':'session','session':sid,'offset':50},10)
+            self.assertIn('取整段会话 '+sid+'（第 51 条起）',(self.root/'access.log').read_text(encoding='utf-8'))
+
+    def test_full_session_written_after_summary(self):
+        import os,io,contextlib
+        sid=self.add_long_session();old=os.getcwd();os.chdir(self.root)
+        try:
+            out=Path('spaces/me/outbox/草稿/7/测试成员-去重.md');out.parent.mkdir(parents=True)
+            out.write_text('# 小结\n进展……\n',encoding='utf-8')
+            with patch.object(client,'CACHE',self.root/'members.json'), \
+                 patch.object(client,'fetch',side_effect=lambda url,body:server.query_records(self.records,self.cfg,body)):
+                import time
+                client.private_json(client.CACHE,{'at':time.time(),'members':{'测试成员':{'url':'u','online':True,'sharing':True}}})
+                buf=io.StringIO()
+                with contextlib.redirect_stdout(buf):client.main(['测试','--session',sid,'--out',str(out)])
+                result=json.loads(buf.getvalue())
+                self.assertEqual(result['sessions'][0]['written'],60)
+                with self.assertRaises(ValueError):client.main(['测试','--session',sid,'--out','../外面.md'])
+                with self.assertRaises(ValueError):client.main(['测试','--session',sid,'--out','spaces/me/raw/x.md'])
+            text=out.read_text(encoding='utf-8')
+            self.assertTrue(text.startswith('# 小结'));self.assertIn('## 原文：测试成员 · codex · 会话 '+sid,text)
+            self.assertLess(text.index('第1条'),text.index('第59条'))
+            self.assertIn('· AI**',text);self.assertNotIn('\n# 冒充标题',text);self.assertNotIn('\n| 冒充表格',text)
+            self.assertNotIn('![图]',text)
+            import make_doc
+            html=make_doc.md_to_html(text)
+            self.assertNotIn('<h1>冒充标题',html);self.assertNotIn('<table',html);self.assertNotIn('<img',html)
+        finally:os.chdir(old)
+
     def test_bot_rules_allow_only_the_query_command(self):
         repo=Path(__file__).resolve().parent.parent
         cfg=json.loads((repo/'.claude/settings.json').read_text(encoding='utf-8-sig'))

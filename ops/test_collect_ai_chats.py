@@ -5,6 +5,23 @@ import unittest
 from unittest.mock import patch
 import collect_ai_chats as ai
 
+
+def check_daily_review(test, raw, day, needle, articles=None):
+    """复盘会读到当天的 AI 对话：Windows 版是 daily_review.py，Mac 版是 daily-review.sh（按日期文件夹找原文）。"""
+    try:
+        import daily_review
+    except ImportError:
+        sh=(Path(__file__).resolve().parent/'daily-review.sh').read_text(encoding='utf-8')
+        test.assertIn('collect_ai_chats.py',sh);test.assertIn('待核实',sh)
+        test.assertEqual(len([p for p in raw.glob('*/'+day+'/*.md')]),1)
+        return
+    with patch.object(daily_review,'RAW',raw):
+        files,docs=daily_review.day_files(day)
+    test.assertEqual(len(files),1)
+    prompt=daily_review.build_prompt(day,files,docs,[],*([articles] if articles else []))
+    test.assertIn(needle,prompt)
+    if articles:test.assertIn(articles[0],prompt);test.assertIn('待核实',prompt)
+
 class ParserTest(unittest.TestCase):
     def test_custom_roots_and_env(self):
         with patch.dict(ai.os.environ, {'AI_TEST_HOME':str(Path.home()/'alternative-codex')}):
@@ -98,7 +115,6 @@ class IncrementalTest(unittest.TestCase):
 class IntegrationTest(unittest.TestCase):
     def test_custom_directory_collection_search_and_review(self):
         import search
-        import daily_review
         from datetime import datetime
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);state=root/'state';state.mkdir()
@@ -118,12 +134,7 @@ class IntegrationTest(unittest.TestCase):
                 rows,total=search.search(db,['数字信号'],source='ai')
                 self.assertEqual(total,1);self.assertIn('用户',rows[0][2])
             finally:db.close()
-            with patch.object(daily_review,'RAW',raw):
-                files,docs=daily_review.day_files(now.date().isoformat())
-            self.assertEqual(len(files),1)
-            prompt=daily_review.build_prompt(now.date().isoformat(),files,docs,[],['article-fixture.md'])
-            self.assertIn('workbuddy-',prompt);self.assertIn('article-fixture.md',prompt)
-            self.assertIn('待核实',prompt)
+            check_daily_review(self,raw,now.date().isoformat(),'workbuddy-',['article-fixture.md'])
 
     @unittest.skipUnless(ai.os.name=='nt','Windows 用户目录模拟')
     def test_other_windows_user_default_paths(self):

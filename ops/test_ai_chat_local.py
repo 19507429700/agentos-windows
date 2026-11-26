@@ -105,7 +105,6 @@ class LocalSnapshotTest(unittest.TestCase):
 
     def test_grok_cli_to_existing_search_and_daily_review(self):
         import search
-        import daily_review
         state=self.root/'state';state.mkdir()
         raw=self.root/'space/raw'
         now=datetime.now(ai.TZ)
@@ -120,10 +119,8 @@ class LocalSnapshotTest(unittest.TestCase):
             rows,total=search.search(index,['飞书消息去重'],source='ai')
             self.assertEqual(total,1);self.assertIn('grokbot-',rows[0][0])
         finally:index.close()
-        with patch.object(daily_review,'RAW',raw):
-            files,docs=daily_review.day_files(now.date().isoformat())
-        self.assertEqual(len(files),1)
-        self.assertIn('grokbot-',daily_review.build_prompt(now.date().isoformat(),files,docs,[]))
+        from test_collect_ai_chats import check_daily_review
+        check_daily_review(self,raw,now.date().isoformat(),'grokbot-')
 
     def test_windows_mac_paths_and_long_name(self):
         mac=local.default_snapshot_roots(self.root,self.root/'state','darwin')

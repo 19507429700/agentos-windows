@@ -101,7 +101,7 @@ class TeamChatTest(unittest.TestCase):
 
     def test_discovery_finds_members_and_marks_offline(self):
         url=self.start()
-        devices=[(url,True,'tager','me@github'),('https://laptop.example.ts.net',False,'laptop','aiyj@github'),
+        devices=[(url,True,'pc1','me@github'),('https://laptop.example.ts.net',False,'laptop','aiyj@github'),
                  ('https://nobody.example.ts.net',True,'printer','x@github')]
         probe_real=client.probe
         with patch.object(client,'CACHE',self.root/'members.json'), \

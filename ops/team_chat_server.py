@@ -1,6 +1,6 @@
 """团队互查：把本机采到的 AI 聊天，只读地开给同一个 Tailscale 团队网络里的人查（本人在终端管理，机器人不运行它）。
 
-  python ops/team_chat_server.py on --name 黄佳旭     打开共享：统一规则 + 挂 Tailscale 地址 + 开机自动运行
+  python ops/team_chat_server.py on --name 张三       打开共享：统一规则 + 挂 Tailscale 地址 + 开机自动运行
   python ops/team_chat_server.py off                  关闭共享：谁都查不了你
   python ops/team_chat_server.py status               现在共享了什么、最近谁查过你
   python ops/team_chat_server.py sessions             列出会话（编号 + 你说的第一句话）

@@ -205,15 +205,41 @@ class TeamChatTest(unittest.TestCase):
 
     def test_bot_rules_allow_only_the_query_command(self):
         repo=Path(__file__).resolve().parent.parent
+        win=(repo/'ops/windows/install.ps1').is_file()  # 同一份测试，Windows 版和 Mac 版仓库都用
+        py='python' if win else 'python3'
         cfg=json.loads((repo/'.claude/settings.json').read_text(encoding='utf-8-sig'))
         allow=cfg['permissions']['allow']
-        self.assertIn('Bash(python ops/team_chat_query.py *)',allow)
+        self.assertIn('Bash('+py+' ops/team_chat_query.py *)',allow)
         self.assertFalse(any('team_chat_server' in rule for rule in allow))
         self.assertIn('Read(~/.agentos/**)',cfg['permissions']['deny'])
         rules=(repo/'CLAUDE.md').read_text(encoding='utf-8-sig')
-        self.assertIn('python ops/team_chat_query.py --members',rules)
-        ps=(repo/'ops/windows/install.ps1').read_text(encoding='utf-8-sig')
-        self.assertIn('AgentOS-TeamChat',ps)
+        self.assertIn(py+' ops/team_chat_query.py --members',rules)
+        self.assertIn(py+' ops/team_chat_query.py 张三 --session',rules)
+        if win:
+            self.assertIn('AgentOS-TeamChat',(repo/'ops/windows/install.ps1').read_text(encoding='utf-8-sig'))
+        else:
+            for name in ('team-chat','collect-ai'):
+                plist=(repo/'ops/launchd'/('com.agentos.'+name+'.plist')).read_text(encoding='utf-8')
+                self.assertIn('__REPO__/ops/',plist)
+            sh=(repo/'ops/install-collectors.sh').read_text(encoding='utf-8')
+            self.assertIn('install_job collect-ai',sh);self.assertIn('install_job team-chat',sh)
+
+    def test_mac_background_job_is_written_and_removed(self):
+        ops=Path(__file__).resolve().parent
+        if not (ops/'launchd').is_dir():self.skipTest('Windows 版仓库没有 launchd 模板')
+        plist=self.root/'Library/LaunchAgents/com.agentos.team-chat.plist'
+        with patch.object(server,'IS_MAC',True),patch.object(server,'STATE',self.root), \
+             patch.object(server.Path,'home',return_value=self.root), \
+             patch.object(server.subprocess,'run') as run:
+            run.return_value.returncode=1;run.return_value.stderr='boom';run.return_value.stdout=''
+            with self.assertRaises(ValueError):server.start_background()  # bootstrap 失败要报出来
+            run.return_value.returncode=0
+            server.start_background()
+            text=plist.read_text(encoding='utf-8')
+            self.assertNotIn('__HOME__',text);self.assertIn(str(ops/'team_chat_server.py'),text)
+            self.assertIn(['launchctl','bootstrap','gui/%d'%server.os.getuid(),str(plist)],[c.args[0] for c in run.call_args_list])
+            server.stop_background()
+            self.assertFalse(plist.exists())
 
 
 if __name__=='__main__':unittest.main()

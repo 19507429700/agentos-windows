@@ -40,6 +40,8 @@ PORT = 8765
 DEFAULT_DAYS = 15
 TASK = 'AgentOS-TeamChat'
 IS_WIN = os.name == 'nt'
+IS_MAC = sys.platform == 'darwin'
+MAC_LABEL = 'com.agentos.team-chat'
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
 
@@ -252,6 +254,7 @@ def tailscale_exe():
     found=shutil.which('tailscale')
     if found:return found
     for p in (Path(os.environ.get('ProgramFiles',r'C:\Program Files'))/'Tailscale'/'tailscale.exe',
+              Path('/opt/homebrew/bin/tailscale'),Path('/usr/local/bin/tailscale'),  # Mac 开源版（Homebrew）
               Path('/Applications/Tailscale.app/Contents/MacOS/Tailscale')):
         if p.is_file():return str(p)
     raise ValueError('找不到 Tailscale：先安装并登录 Tailscale，加入团队网络')
@@ -290,9 +293,30 @@ def powershell(script,env=None):
                           capture_output=True,text=True,encoding='utf-8',errors='replace',creationflags=NO_WINDOW)
 
 
+def mac_plist():
+    return Path.home()/'Library'/'LaunchAgents'/(MAC_LABEL+'.plist')
+
+
+def mac_bootout():
+    label='gui/%d/%s'%(os.getuid(),MAC_LABEL)
+    subprocess.run(['launchctl','bootout',label],capture_output=True)
+    for _ in range(20):  # bootout 是异步的，没退干净就 bootstrap 会报 Input/output error
+        if subprocess.run(['launchctl','print',label],capture_output=True).returncode!=0:break
+        time.sleep(0.5)
+
+
 def start_background():
-    """注册并启动「登录后一直运行」的后台任务（Windows）。"""
+    """装并启动「登录后一直运行」的后台任务：Windows 用任务计划程序，Mac 用 launchd。"""
     repo=Path(__file__).resolve().parent.parent
+    if IS_MAC:
+        text=(repo/'ops'/'launchd'/(MAC_LABEL+'.plist')).read_text(encoding='utf-8')
+        plist=mac_plist();plist.parent.mkdir(parents=True,exist_ok=True)
+        (STATE/'logs').mkdir(parents=True,exist_ok=True)
+        plist.write_text(text.replace('__HOME__',str(Path.home())).replace('__REPO__',str(repo)),encoding='utf-8')
+        mac_bootout()
+        r=subprocess.run(['launchctl','bootstrap','gui/%d'%os.getuid(),str(plist)],capture_output=True,text=True)
+        if r.returncode!=0:raise ValueError('后台任务没装上：'+(r.stderr or r.stdout).strip()[-400:])
+        return
     spec={'name':TASK,'python':windowless_python(),'repo':str(repo),
           'arguments':subprocess.list2cmdline(['-X','utf8',str(repo/'ops'/'team_chat_server.py'),'serve'])}
     env=os.environ.copy();env['AGENTOS_TASK_SPEC']=json.dumps(spec,ensure_ascii=False)
@@ -301,6 +325,11 @@ def start_background():
 
 
 def stop_background():
+    if IS_MAC:
+        mac_bootout()
+        try:mac_plist().unlink()
+        except FileNotFoundError:pass
+        return
     powershell('Stop-ScheduledTask -TaskName '+TASK+' -ErrorAction SilentlyContinue; '
                'Disable-ScheduledTask -TaskName '+TASK+' -ErrorAction SilentlyContinue | Out-Null')
 
@@ -328,7 +357,8 @@ def cmd_on(args):
     if args.name:cfg['name']=args.name.strip()
     if not cfg.get('name'):raise ValueError('第一次打开要写名字：on --name 你的名字（别人查你时看到的名字）')
     if not 1<=args.days<=90:raise ValueError('--days 范围 1–90')
-    if not (STATE/'ai_chats.db').is_file():raise ValueError('还没采集过 AI 聊天：先运行 py ops\\collect_ai_chats.py')
+    if not (STATE/'ai_chats.db').is_file():
+        raise ValueError('还没采集过 AI 聊天：先运行 '+('py ops\\collect_ai_chats.py' if IS_WIN else 'python3 ~/AgentOS/ops/collect_ai_chats.py'))
     cfg.update(enabled=True,days=args.days)
     private_json(CONFIG,cfg)
     removed=cleanup_old_invites()
@@ -336,25 +366,26 @@ def cmd_on(args):
     run([ts,'serve','--bg','http://127.0.0.1:%d'%PORT])
     status=json.loads(run([ts,'status','--json']).stdout or '{}')
     url='https://'+(status.get('Self',{}).get('DNSName') or '').rstrip('.')
-    if IS_WIN:
+    if IS_WIN or IS_MAC:
         start_background()
         for _ in range(20):
             if local_health():break
             time.sleep(0.5)
-        bg='已装成开机自动运行（任务计划程序 '+TASK+'），日志 '+str(STATE/'logs'/'team-chat.log')
+        bg=('已装成开机自动运行（任务计划程序 '+TASK+'）' if IS_WIN else '已装成登录后自动运行（launchd '+MAC_LABEL+'）')+\
+           '，日志 '+str(STATE/'logs'/'team-chat.log')
     else:
-        bg='这台不是 Windows：先在另一个终端窗口运行 python3 ops/team_chat_server.py serve 并保持打开'
+        bg='这台电脑的系统还没适配后台运行：先在另一个终端窗口运行 python3 ops/team_chat_server.py serve 并保持打开'
     print('✅ 已打开共享：'+cfg['name']+'，所有 AI 软件，团队成员最多查到最近 '+str(cfg['days'])+' 天')
     print('   你的地址：'+url+'（只有团队网络里的人能打开）')
     print('   '+bg)
     if removed:print('   已删除旧版的邀请/钥匙文件：'+'、'.join(removed))
-    if IS_WIN and not local_health():print('⚠️ 本机服务还没响应，等一分钟后运行 status 再看；还不行看上面的日志')
+    if (IS_WIN or IS_MAC) and not local_health():print('⚠️ 本机服务还没响应，等一分钟后运行 status 再看；还不行看上面的日志')
     if cfg['hidden']:print('   有 '+str(len(cfg['hidden']))+' 个会话设为不共享（status 可看）')
 
 
 def cmd_off(args):
     cfg=load_config();cfg['enabled']=False;private_json(CONFIG,cfg)
-    if IS_WIN:stop_background()
+    if IS_WIN or IS_MAC:stop_background()
     try:run([tailscale_exe(),'serve','--https=443','off'],check=False)
     except ValueError:pass
     print('已关闭共享：服务已停，Tailscale 地址已撤下，谁都查不了你。已经被别人看过的内容收不回来。')

@@ -25,7 +25,9 @@ from ai_chat_local import (SNAPSHOT_SOURCES, default_snapshot_roots, find_snapsh
 HOME = Path.home()
 REPO = Path(__file__).resolve().parent.parent
 STATE = Path(os.environ.get('AGENTOS_STATE_DIR', HOME / '.agentos'))
-RAW = Path(os.environ.get('AGENTOS_RAW', REPO / 'spaces/me/raw'))
+# Mac 版：采集在你的账号里跑，原文写进机器人账号里的运行副本（和微信、飞书采集一样）
+RAW = Path(os.environ.get('AGENTOS_RAW', '/Users/agentos/agentos/spaces/me/raw' if sys.platform == 'darwin'
+                          else REPO / 'spaces/me/raw'))
 TZ = timezone(timedelta(hours=8))
 CODEX_HOME = Path(os.path.expandvars(os.environ.get('CODEX_HOME', str(HOME/'.codex')))).expanduser()
 DEFAULT_ROOTS = {'workbuddy': [str(HOME/'.workbuddy/projects')],

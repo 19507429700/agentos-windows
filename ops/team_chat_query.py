@@ -123,7 +123,7 @@ def ask(name,m,body):
                          429:'查得太频繁，过一分钟再试',503:'「'+name+'」的电脑在线，但聊天库暂时读不了'
                          }.get(exc.code,'对方返回错误：'+str(exc.code))
                 if exc.code==400 and body.get('mode')=='session':
-                    problem='「'+name+'」的 AgentOS 还是旧版，不支持取整段对话；请他拉一次更新（git pull + 重跑 install.ps1）'
+                    problem='「'+name+'」的 AgentOS 还是旧版，不支持取整段对话；请他拉一次更新（git pull，再重跑安装脚本）'
                 if exc.code!=403:raise ValueError(problem) from None
             except (URLError,TimeoutError,OSError):
                 problem='连不上「'+name+'」：可能刚关机或断网；这不等于没有记录'

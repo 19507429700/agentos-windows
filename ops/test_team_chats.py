@@ -115,6 +115,26 @@ class TeamChatTest(unittest.TestCase):
             ms=client.members(refresh=True)
             self.assertFalse(ms['阿毅']['online'])
             with self.assertRaises(ValueError):client.find('不存在的人')
+            with self.assertRaisesRegex(ValueError,'不在线'):client.main(['阿毅','--recent'])
+
+    def test_sharing_off_is_not_reported_as_offline(self):
+        # off 会停掉服务：电脑仍在团队网络里在线，但不应答，要说「关掉了共享」而不是「不在线」
+        from urllib.error import URLError
+        off='https://off.example.ts.net'
+        with patch.object(client,'CACHE',self.root/'members.json'), \
+             patch.object(client,'tailnet_devices',return_value=[(off,True,'pc','x@github')]), \
+             patch.object(client,'probe',return_value=None), \
+             patch.object(client,'fetch',side_effect=URLError('refused')) as fetch:
+            client.private_json(client.CACHE,{'at':0,'members':{'小关':{'url':off,'online':True,'sharing':True}}})
+            ms=client.members(refresh=True)
+            self.assertTrue(ms['小关']['online']);self.assertFalse(ms['小关']['sharing'])
+            with self.assertRaisesRegex(ValueError,'关掉了共享'):client.main(['小关','--recent'])
+            fetch.assert_not_called()
+            # 缓存还没过期、还写着在共享：查询失败后重新问一遍，照样说「关掉了共享」
+            import time
+            client.private_json(client.CACHE,{'at':time.time(),'members':{'小关':{'url':off,'online':True,'sharing':True}}})
+            with self.assertRaisesRegex(ValueError,'关掉了共享'):client.main(['小关','--recent'])
+            self.assertEqual(fetch.call_count,1)
 
     def test_bot_rules_allow_only_the_query_command(self):
         repo=Path(__file__).resolve().parent.parent

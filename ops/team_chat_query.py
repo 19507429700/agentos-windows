@@ -66,9 +66,11 @@ def discover():
     for (url,_,host,login),h in zip(online,healths):
         if h:members[h['name']]={'url':url,'host':host,'login':login,'sharing':bool(h.get('sharing')),
                                  'days':h.get('days'),'online':True}
-    for name,m in old.items():  # 之前见过、现在离线的人也列出来，标明离线
-        if name not in members and any(m.get('url')==d[0] for d in devices):
-            members[name]=dict(m,online=False)
+    for name,m in old.items():  # 之前见过、这次没应答的人也列出来
+        device=next((d for d in devices if d[0]==m.get('url')),None)
+        if name in members or not device:continue
+        # 电脑在团队网络里在线、却没应答：是他关掉了共享（off 会停掉服务）；电脑不在线才是关机/断网
+        members[name]=dict(m,online=device[1],sharing=False)
     private_json(CACHE,{'at':time.time(),'members':members})
     return members
 
@@ -115,16 +117,21 @@ def main(argv=None):
     if not 1<=args.days<=90 or not 1<=args.limit<=20:raise ValueError('days 范围1–90，limit 范围1–20')
     if not args.recent and not args.terms:raise ValueError('请给关键词，或使用 --recent')
     name,m=find(args.member)
-    if not m.get('online'):raise ValueError('「'+name+'」的电脑现在不在线（关机、睡眠或断网），查不到；这不等于没有记录')
     body={'mode':'recent' if args.recent else 'search','terms':args.terms,'days':args.days,'limit':args.limit}
     if args.platform:body['platform']=args.platform
-    try:result=fetch(m['url'],body)
-    except HTTPError as exc:
-        raise ValueError({401:'请求没有经过团队网络，对方拒绝了',403:'「'+name+'」关掉了共享',
-                          429:'查得太频繁，过一分钟再试',503:'「'+name+'」的电脑在线，但聊天库暂时读不了'
-                          }.get(exc.code,'对方返回错误：'+str(exc.code))) from None
-    except (URLError,TimeoutError,OSError):
-        raise ValueError('连不上「'+name+'」：可能刚关机或断网；这不等于没有记录') from None
+    for retry in (False,True):
+        if retry:m=members(refresh=True).get(name) or {}  # 缓存可能过时：重新问一遍对方现在的状态
+        if not m.get('online'):raise ValueError('「'+name+'」的电脑现在不在线（关机、睡眠或断网），查不到；这不等于没有记录')
+        if not m.get('sharing'):raise ValueError('「'+name+'」关掉了共享（或查询服务没在运行），查不到；这不等于没有记录')
+        try:result=fetch(m['url'],body);break
+        except HTTPError as exc:
+            if exc.code==403 and not retry:continue
+            raise ValueError({401:'请求没有经过团队网络，对方拒绝了',403:'「'+name+'」关掉了共享',
+                              429:'查得太频繁，过一分钟再试',503:'「'+name+'」的电脑在线，但聊天库暂时读不了'
+                              }.get(exc.code,'对方返回错误：'+str(exc.code))) from None
+        except (URLError,TimeoutError,OSError):
+            if not retry:continue
+            raise ValueError('连不上「'+name+'」：可能刚关机或断网；这不等于没有记录') from None
     print(json.dumps(result,ensure_ascii=False));return 0
 
 

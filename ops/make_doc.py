@@ -172,7 +172,7 @@ def convert(src: Path, dst: Path) -> None:
     if not fmt:
         sys.exit(f"不支持的输出格式：{dst.suffix}（支持 {' '.join(TARGETS)}）")
     s_ext, d_ext = src.suffix.lower().replace(".jpeg", ".jpg"), dst.suffix.lower().replace(".jpeg", ".jpg")
-    if s_ext in IMAGE_SUFFIXES and s_ext == d_ext:  # 同格式的图片：直接复制
+    if s_ext == d_ext and s_ext not in (".md", ".markdown", ".html", ".htm"):  # 同格式（图片、PDF、Word 原件等）：直接复制
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
         return

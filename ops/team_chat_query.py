@@ -5,7 +5,9 @@ python ops/team_chat_query.py 张三 消息去重 --days 7  按关键词查（�
 python ops/team_chat_query.py 张三 --recent --days 3  看最近的聊天
 python ops/team_chat_query.py 张三 --session 编号 [编号…] --out spaces/me/outbox/草稿/任务号/正文.md
     用户明确要某个话题的全部对话时：把这几个会话（编号取自上面查询结果里的 session）整段取回，
-    按时间顺序追加写进那个 .md（只能写在 spaces/me/outbox/ 下），再用 make_doc.py 转成 Word
+    按时间顺序追加写进那个 .md（只能写在 spaces/me/outbox/ 下），截图嵌进去，再用 make_doc.py 转成 Word
+python ops/team_chat_query.py 张三 --file spaces/me/raw/ai/files/… [更多] --to spaces/me/outbox/任务号/
+    用户要对方发给 AI 的某个原文件时：路径取自查询结果里「[文件 名字] 可看：…」，存进任务文件夹随回复发出
 
 不需要邀请文件或钥匙：请求经 Tailscale 发出，对方电脑认得出是谁在查。
 """
@@ -32,6 +34,7 @@ MAX_REPLY = 1024*1024
 MAX_ATTACH_REPLY = 30*1024*1024   # 一个附件原件最大 20MB，转成文字传输会变大约三分之一
 MAX_ATTACH_COUNT = 300            # 一次最多取多少个截图和文件
 MAX_ATTACH_TOTAL = 200*1024*1024
+FILE_PATH = re.compile(r'spaces/me/raw/ai/files/\d{4}-\d{2}-\d{2}/[^/\\]{1,200}')
 ATTACH_MARK = re.compile(r'\[(截图|文件 [^\]\n]+)\] 可看：(spaces/me/raw/ai/(?:images|files)/[^\s）)]+)')
 
 
@@ -177,35 +180,22 @@ def safe_name(text):
 
 
 class Attachments:
-    """整段对话里的截图和文件：向对方取原件。截图存进草稿、嵌进 Word；文件放进任务文件夹，随文档一起发到飞书。"""
+    """整段对话里的截图：向对方取原图，存进草稿、嵌进 Word。文件只写名字，用户要了再用 --file 单独取。"""
     def __init__(self,name,m,days,out):
         self.name,self.m,self.days=name,m,days
         self.img_dir=out.parent/(safe_name(out.stem)+'-图片')
-        cwd=Path.cwd().resolve()
-        parts=out.relative_to(cwd).parts if out.is_relative_to(cwd) else ()
-        if len(parts)>=6 and parts[:4]==('spaces','me','outbox','草稿'):  # 草稿/<任务号>/… → outbox/<任务号>/，里面的文件会发到飞书
-            self.send_dir=cwd/'spaces'/'me'/'outbox'/parts[4]
-        else:
-            self.send_dir=out.parent/(safe_name(out.stem)+'-附件')
-        self.cache={};self.total=0;self.images=0;self.files=0;self.failed=0
+        self.cache={};self.total=0;self.images=0;self.failed=0;self.files_named=0
 
-    def get(self,rel):
+    def image(self,rel):
         if rel in self.cache:return self.cache[rel]
         saved=None
         if len(self.cache)<MAX_ATTACH_COUNT and self.total<MAX_ATTACH_TOTAL:
             try:
                 r=ask(self.name,self.m,{'mode':'attachment','path':rel,'days':self.days})
                 data=base64.b64decode(r.get('data') or '')
-                fname=rel.rsplit('/',1)[-1]
-                if '/images/' in rel:
-                    target=self.img_dir/safe_name(fname);self.images+=1
-                else:
-                    target=self.send_dir/re.sub(r'^[0-9a-f]{12}-','',fname);self.files+=1
-                    n=2
-                    while target.exists() and target.read_bytes()!=data:
-                        target=target.with_name(target.stem.rsplit('（',1)[0]+'（'+str(n)+'）'+target.suffix);n+=1
-                target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
-                self.total+=len(data);saved=target
+                saved=self.img_dir/safe_name(rel.rsplit('/',1)[-1])
+                saved.parent.mkdir(parents=True,exist_ok=True);saved.write_bytes(data)
+                self.total+=len(data);self.images+=1
             except (ValueError,OSError,binascii.Error):
                 saved=None
         if saved is None:self.failed+=1
@@ -215,11 +205,12 @@ class Attachments:
     def render(self,text):
         def one(m):
             label,rel=m.group(1),m.group(2)
-            saved=self.get(rel)
-            if label=='截图':
-                if not saved:return '[截图]（没取到原图）'
-                return '\n\n![截图]('+saved.relative_to(Path.cwd().resolve()).as_posix()+')\n\n'
-            return '['+label+']'+('（原文件已随文档一起发送：'+saved.name+'）' if saved else '（没取到原件）')
+            if label!='截图':
+                self.files_named+=1
+                return '['+label+']（原文件没随文档发送，要的话在飞书里说一声）'
+            saved=self.image(rel)
+            if not saved:return '[截图]（没取到原图）'
+            return '\n\n![截图]('+saved.relative_to(Path.cwd().resolve()).as_posix()+')\n\n'
         return ATTACH_MARK.sub(one,text)
 
 
@@ -270,11 +261,31 @@ def fetch_sessions(name,m,args):
             with path.open('a',encoding='utf-8') as f:f.write('\n'+text)
         if written>=MAX_OUT:break
     return {'owner':name,'out':str(path),'sessions':summary,
-            'attachments':{'images':attach.images,'files':attach.files,'failed':attach.failed,
-                           'files_dir':str(attach.send_dir) if attach.files else None},
-            'note':'已按时间顺序追加写进文件；截图已嵌进文件，原文件放在 files_dir（任务文件夹里的会随回复发到飞书）；'
+            'attachments':{'images':attach.images,'images_failed':attach.failed,'files_named':attach.files_named},
+            'note':'已按时间顺序追加写进文件，截图已嵌进去；对话里提到的文件只写了名字（用户要原件再用 --file 取）。'
                    '下一步用 make_doc.py 转成 Word。'+
                    ('一次最多写 '+str(MAX_OUT)+' 条，后面的没写。' if written>=MAX_OUT else '')}
+
+
+def fetch_files(name,m,paths,to,days):
+    """用户点名要的原文件：向对方取，存进任务文件夹（outbox/<任务号>/ 里的文件会随回复发到飞书）。"""
+    base=(Path.cwd()/'spaces'/'me'/'outbox').resolve()
+    folder=(Path.cwd()/to).resolve()
+    if folder.suffix or base not in folder.parents or '草稿' in folder.relative_to(base).parts:
+        raise ValueError('--to 写任务文件夹，例如 spaces/me/outbox/25/（里面的文件会发到飞书）')
+    out=[]
+    for rel in paths:
+        if not FILE_PATH.fullmatch(rel):
+            raise ValueError('--file 写查询结果里「[文件 名字] 可看：」后面的路径（spaces/me/raw/ai/files/…）；截图已经在 Word 里')
+        try:
+            r=ask(name,m,{'mode':'attachment','path':rel,'days':days})
+            data=base64.b64decode(r.get('data') or '')
+            target=folder/re.sub(r'^[0-9a-f]{12}-','',rel.rsplit('/',1)[-1])
+            folder.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
+            out.append({'path':rel,'saved':str(target),'size':len(data)})
+        except (ValueError,binascii.Error) as exc:
+            out.append({'path':rel,'error':str(exc) if '「' in str(exc) else '取不到：超出共享范围、对方删了原件，或对方还是旧版'})
+    return {'owner':name,'files':out,'note':'取到的文件已放进任务文件夹，会随回复发到飞书。'}
 
 
 def main(argv=None):
@@ -284,13 +295,19 @@ def main(argv=None):
     ap.add_argument('--days',type=int);ap.add_argument('--limit',type=int,default=5)
     ap.add_argument('--platform')
     ap.add_argument('--session',nargs='+');ap.add_argument('--offset',type=int,default=0);ap.add_argument('--out')
+    ap.add_argument('--file',nargs='+');ap.add_argument('--to')
     args=ap.parse_args(argv)
     if args.members:
         ms=members(refresh=True)
         print(json.dumps({'members':[{'name':k,'online':v.get('online'),'sharing':v.get('sharing'),'days':v.get('days')}
                                      for k,v in ms.items()]},ensure_ascii=False));return 0
     if not args.member:raise ValueError('要写查谁，例如：team_chat_query.py 张三 --recent')
-    if args.days is None:args.days=15 if args.session else 7  # 整段会话默认取满对方共享的天数
+    if args.days is None:args.days=15 if args.session or args.file else 7  # 整段会话、原文件默认取满对方共享的天数
+    if args.file:
+        if not args.to:raise ValueError('--file 要配 --to 任务文件夹，例如 --to spaces/me/outbox/25/')
+        if len(args.file)>20:raise ValueError('一次最多取 20 个文件')
+        name,m=find(args.member)
+        print(json.dumps(fetch_files(name,m,args.file,args.to,args.days),ensure_ascii=False));return 0
     if args.session:
         if args.terms or args.recent:raise ValueError('--session 不和关键词、--recent 一起用')
         if len(args.session)>10 or not all(len(x)==16 for x in args.session):raise ValueError('--session 写 1–10 个 16 位会话编号')

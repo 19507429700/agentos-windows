@@ -240,7 +240,7 @@ class TeamChatTest(unittest.TestCase):
             (raw/img[len('spaces/me/raw/'):]).unlink()
             with self.assertRaises(ValueError):server.query_records(self.records,self.cfg,{'mode':'attachment','path':img})
 
-    def test_full_session_embeds_images_and_sends_files(self):
+    def test_full_session_embeds_images_files_on_request(self):
         import os,io,contextlib,time
         raw,img,pdf,hid=self.add_attachments();old=os.getcwd();os.chdir(self.root)
         try:
@@ -251,13 +251,23 @@ class TeamChatTest(unittest.TestCase):
                 buf=io.StringIO()
                 with contextlib.redirect_stdout(buf):client.main(['测试','--session',server.opaque('s2'),'--out',str(out)])
                 result=json.loads(buf.getvalue())
-            self.assertEqual(result['attachments']['images'],1);self.assertEqual(result['attachments']['files'],1)
-            text=out.read_text(encoding='utf-8')
-            self.assertIn('![截图](spaces/me/outbox/草稿/9/测试成员-周报-图片/aaaaaaaaaaaa.png)',text)
-            self.assertIn('[文件 期中卷.pdf]（原文件已随文档一起发送：期中卷.pdf）',text)
-            self.assertNotIn('spaces/me/raw/',text)
-            self.assertEqual(Path('spaces/me/outbox/9/期中卷.pdf').read_bytes(),b'%PDF')
-            self.assertEqual(Path('spaces/me/outbox/草稿/9/测试成员-周报-图片/aaaaaaaaaaaa.png').read_bytes(),b'PNGDATA')
+                self.assertEqual(result['attachments']['images'],1);self.assertEqual(result['attachments']['files_named'],1)
+                text=out.read_text(encoding='utf-8')
+                self.assertIn('![截图](spaces/me/outbox/草稿/9/测试成员-周报-图片/aaaaaaaaaaaa.png)',text)
+                self.assertIn('[文件 期中卷.pdf]（原文件没随文档发送，要的话在飞书里说一声）',text)
+                self.assertNotIn('spaces/me/raw/',text)
+                self.assertFalse(Path('spaces/me/outbox/9').exists())  # 文件不自动发
+                self.assertEqual(Path('spaces/me/outbox/草稿/9/测试成员-周报-图片/aaaaaaaaaaaa.png').read_bytes(),b'PNGDATA')
+                # 用户在飞书里点名要原件：--file 取到任务文件夹
+                buf=io.StringIO()
+                other=pdf.replace('cccccccccccc-期中卷','dddddddddddd-别人')
+                with contextlib.redirect_stdout(buf):client.main(['测试','--file',pdf,other,'--to','spaces/me/outbox/9/'])
+                files=json.loads(buf.getvalue())['files']
+                self.assertEqual(Path('spaces/me/outbox/9/期中卷.pdf').read_bytes(),b'%PDF')
+                self.assertIn('error',files[1])  # 共享范围内没提到过的原件不给
+                for bad in (['--file',img,'--to','spaces/me/outbox/9/'],['--file',pdf,'--to','spaces/me/outbox/草稿/9/'],
+                            ['--file',pdf,'--to','../x/'],['--file',pdf]):
+                    with self.assertRaises(ValueError):client.main(['测试']+bad)
         finally:os.chdir(old)
         # 对方还是旧版、取不到原件：只写占位，不报错
         self.assertEqual(client.topic_of('[截图] 可看：'+img+'\n帮我看看这张图'),'帮我看看这张图')
@@ -276,6 +286,7 @@ class TeamChatTest(unittest.TestCase):
         rules=(repo/'CLAUDE.md').read_text(encoding='utf-8-sig')
         self.assertIn(py+' ops/team_chat_query.py --members',rules)
         self.assertIn(py+' ops/team_chat_query.py 张三 --session',rules)
+        self.assertIn(py+' ops/team_chat_query.py 张三 --file',rules)
         if win:
             self.assertIn('AgentOS-TeamChat',(repo/'ops/windows/install.ps1').read_text(encoding='utf-8-sig'))
         else:

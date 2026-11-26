@@ -144,8 +144,13 @@ PLATFORM_NAMES = {'workbuddy':'WorkBuddy','claude':'Claude Code','codex':'Codex'
 def readable(text):
     """对方的原话放进文档：保留 AI 回复里的列表、表格、加粗；标题改成加粗段落（免得打乱文档目录），
     插图语法拆开（不去嵌本机文件），去掉软件自动加的包装和凭据。"""
+    text=clean_text(text)
+    text=re.sub(r'<image_local_path>.*?</image_local_path>','[截图]',text,flags=re.S)  # WorkBuddy 贴图：只留占位，不露本机路径
+    text=re.sub(r'@image#\d+:(\S+)',r'[图片 \1]',text)
+    text=re.sub(r'@"[^"]*[\\/]([^"\\/]+)"',r'@\1',text)  # @"D:/…/文件.zip" 只留文件名
     out=[]
-    for line in clean_text(text).splitlines():
+    for line in text.splitlines():
+        line=re.sub(r'^\s*>\s?','',line)  # 引用块：Word 里显示不出来，去掉 > 号
         m=re.match(r'\s*#{1,6}\s+(.*)',line)
         if m:line='**'+m.group(1).strip().strip('*')+'**'
         out.append(line.replace('![','!\u200b['))

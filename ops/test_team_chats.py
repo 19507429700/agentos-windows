@@ -174,6 +174,13 @@ class TeamChatTest(unittest.TestCase):
             server.log_access('a@github',{'mode':'session','session':sid,'offset':50},10)
             self.assertIn('取整段会话 '+sid+'（第 51 条起）',(self.root/'access.log').read_text(encoding='utf-8'))
 
+    def test_readable_hides_local_paths(self):
+        text=client.readable('@image#1:shot.png\n<image_local_path>C:\\Users\\x\\a.png</image_local_path>\n'
+                             '@"D:/xwechat_files/wxid_abc/msg/卷子.zip" 看一下\n> 引用的话\n## 小标题')
+        self.assertNotIn('C:\\Users',text);self.assertNotIn('wxid_abc',text)
+        self.assertIn('[截图]',text);self.assertIn('[图片 shot.png]',text);self.assertIn('@卷子.zip 看一下',text)
+        self.assertIn('\n引用的话\n',text);self.assertIn('**小标题**',text)
+
     def test_full_session_written_after_summary(self):
         import os,io,contextlib
         sid=self.add_long_session();old=os.getcwd();os.chdir(self.root)

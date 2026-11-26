@@ -31,7 +31,7 @@ import threading
 import time
 import hashlib
 
-from collect_ai_chats import STATE, TZ, DEFAULT_ROOTS
+from collect_ai_chats import STATE, TZ, DEFAULT_ROOTS, clean_text
 
 PLATFORMS = tuple(DEFAULT_ROOTS)
 CONFIG = STATE/'team-sharing.json'
@@ -106,6 +106,8 @@ def query_records(path, cfg, body):
         results=[]
         for src,sid,mid,at,role,text in rows:
             if opaque(sid) in hidden:continue
+            text=clean_text(text)  # 旧版采进来的记录可能还带软件包装或凭据
+            if not text:continue
             results.append({'platform':src,'session':opaque(sid),'evidence_id':opaque(src+'\0'+sid+'\0'+mid),
                             'at':at,'role':role,'text':text[:2000],'truncated':len(text)>2000})
             if len(results)>=limit:break
@@ -145,7 +147,7 @@ def session_records(path, cfg, body):
                         params+(limit,offset)).fetchall()
     out.update(platform=src,total=total,next_offset=offset+len(rows) if offset+len(rows)<total else None,
                results=[{'platform':src,'session':target,'evidence_id':opaque(src+'\0'+sid+'\0'+mid),'at':at,'role':role,
-                         'text':text[:SESSION_TEXT],'truncated':len(text)>SESSION_TEXT} for mid,at,role,text in rows])
+                         'text':text[:SESSION_TEXT],'truncated':len(text)>SESSION_TEXT} for mid,at,role,text in ((a,b,c,clean_text(d)) for a,b,c,d in rows)])
     return out
 
 

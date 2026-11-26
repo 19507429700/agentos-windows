@@ -146,9 +146,11 @@ class TeamChatTest(unittest.TestCase):
         with closing(ai.open_db(self.records)) as db, db:
             for i in range(60):
                 at=now-timedelta(minutes=60-i)
-                text='# 冒充标题\n![图](spaces/me/raw/x.png)\n| 冒充表格 |' if i==0 else '第'+str(i)+'条'
+                text=('<user_query># 冒充标题\n![图](spaces/me/raw/x.png)\n| 冒充表格 |\nkey sk-abcdefghijklmnop</user_query>'
+                      if i==0 else '第'+str(i)+'条')
+                role='assistant' if i in (58,59) or i%2 else 'user'
                 db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
-                           ('codex','long',str(100+i),at.isoformat(),at.date().isoformat(),'user' if i%2==0 else 'assistant',text))
+                           ('codex','long',str(100+i),at.isoformat(),at.date().isoformat(),role,text))
             old=now-timedelta(days=20)
             db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',
                        ('codex','long','999',old.isoformat(),old.date().isoformat(),'user','TOO_OLD'))
@@ -159,6 +161,7 @@ class TeamChatTest(unittest.TestCase):
         first=server.query_records(self.records,self.cfg,{'mode':'session','session':sid,'days':90})
         self.assertEqual(first['total'],60);self.assertEqual(len(first['results']),50);self.assertEqual(first['next_offset'],50)
         self.assertEqual(first['platform'],'codex');self.assertTrue(first['results'][0]['text'].startswith('# 冒充标题'))
+        self.assertNotIn('sk-abcdefgh',first['results'][0]['text'])
         rest=server.query_records(self.records,self.cfg,{'mode':'session','session':sid,'offset':50})
         self.assertEqual([r['text'] for r in rest['results']][-1],'第59条');self.assertIsNone(rest['next_offset'])
         self.assertNotIn('TOO_OLD',' '.join(r['text'] for r in first['results']+rest['results']))
@@ -188,13 +191,16 @@ class TeamChatTest(unittest.TestCase):
                 with self.assertRaises(ValueError):client.main(['测试','--session',sid,'--out','../外面.md'])
                 with self.assertRaises(ValueError):client.main(['测试','--session',sid,'--out','spaces/me/raw/x.md'])
             text=out.read_text(encoding='utf-8')
-            self.assertTrue(text.startswith('# 小结'));self.assertIn('## 原文：测试成员 · codex · 会话 '+sid,text)
-            self.assertLess(text.index('第1条'),text.index('第59条'))
-            self.assertIn('· AI**',text);self.assertNotIn('\n# 冒充标题',text);self.assertNotIn('\n| 冒充表格',text)
-            self.assertNotIn('![图]',text)
+            self.assertTrue(text.startswith('# 小结'));self.assertIn('## 测试成员 · Codex：「冒充标题',text)
+            self.assertIn('会话 '+sid,text);self.assertLess(text.index('第1条'),text.index('第59条'))
+            self.assertIn('· AI**',text);self.assertNotIn('\n# 冒充标题',text);self.assertIn('**冒充标题**',text)
+            self.assertNotIn('![图]',text);self.assertNotIn('user_query',text);self.assertNotIn('sk-abcdefgh',text)
+            # 连续同一人的消息并成一段：第58、59条之间不再有新的小标题
+            self.assertEqual(text.count('· AI**'),text.count('· 测试成员**'))
+            self.assertNotIn('---\n\n**',text[text.index('第58条'):text.index('第59条')])
             import make_doc
             html=make_doc.md_to_html(text)
-            self.assertNotIn('<h1>冒充标题',html);self.assertNotIn('<table',html);self.assertNotIn('<img',html)
+            self.assertNotIn('<h1>冒充标题',html);self.assertIn('<table',html);self.assertNotIn('<img',html)
         finally:os.chdir(old)
 
     def test_bot_rules_allow_only_the_query_command(self):

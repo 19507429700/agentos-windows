@@ -14,12 +14,14 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
+import re
 import sys
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-from team_chat_server import STATE, private_json, read_json, run, tailscale_exe
+from collect_ai_chats import clean_text
+from team_chat_server import STATE, private_json, read_json, run, tailscale_exe, title_of
 
 CACHE = STATE/'team-members.json'
 CACHE_SECONDS = 600
@@ -136,21 +138,49 @@ def out_path(text):
     return path
 
 
-def plain(text):
-    """对方的原话照原样放进文档：每行前加一个看不见的字符，免得被当成标题、列表、表格或插图。"""
-    return '\n'.join('\u200b'+line.replace('![','!\u200b[') if line.strip() else '' for line in text.splitlines())
+PLATFORM_NAMES = {'workbuddy':'WorkBuddy','claude':'Claude Code','codex':'Codex','grokbot':'Grok Bot'}
+
+
+def readable(text):
+    """对方的原话放进文档：保留 AI 回复里的列表、表格、加粗；标题改成加粗段落（免得打乱文档目录），
+    插图语法拆开（不去嵌本机文件），去掉软件自动加的包装和凭据。"""
+    out=[]
+    for line in clean_text(text).splitlines():
+        m=re.match(r'\s*#{1,6}\s+(.*)',line)
+        if m:line='**'+m.group(1).strip().strip('*')+'**'
+        out.append(line.replace('![','!\u200b['))
+    return '\n'.join(out)
+
+
+def topic_of(text):
+    """会话标题：本人第一句话，去掉排版符号和插图语法。"""
+    t=re.sub(r'!\[[^\]]*\]\([^)]*\)','',clean_text(text))
+    return ' '.join(re.sub(r'[#*`|>]',' ',title_of(t)).split())
 
 
 def session_markdown(owner,page_list):
+    """一个会话写成一节：同一个人连续说的几条并成一段（AI 常把一次回答拆成好几条）。"""
     first=page_list[0];rows=[r for page in page_list for r in page['results']]
-    lines=['## 原文：'+owner+' · '+str(first.get('platform') or '')+' · 会话 '+first['session'],'',
-           first['since']+' ～ '+first['through']+' 内共 '+str(first['total'])+' 条'+
+    topic=next((t for t in (topic_of(r['text']) for r in rows if r['role']=='user') if t),'')
+    lines=['## '+owner+' · '+PLATFORM_NAMES.get(first.get('platform'),str(first.get('platform') or ''))+
+           ('：「'+topic+'」' if topic else ''),'',
+           '会话 '+first['session']+'，'+first['since']+' ～ '+first['through']+' 内共 '+str(first['total'])+' 条'+
            ('' if len(rows)>=first['total'] else '，这里只写了前 '+str(len(rows))+' 条（一次最多 '+str(MAX_OUT)+' 条）')+
            '。「AI」的话是 AI 的回复，不代表事情已经做完。','']
+    groups=[]
     for r in rows:
-        who=owner if r['role']=='user' else 'AI'
-        lines+=['**'+r['at'][:16].replace('T',' ')+' · '+who+'**（evidence_id '+r['evidence_id']+
-                ('，原文过长，已截断' if r.get('truncated') else '')+'）','',plain(r['text']),'']
+        text=readable(r['text'])
+        if not text.strip():continue
+        if groups and groups[-1]['role']==r['role']:groups[-1]['items'].append((r,text))
+        else:groups.append({'role':r['role'],'items':[(r,text)]})
+    for g in groups:
+        items=g['items'];start=items[0][0]['at'][:16].replace('T',' ');end=items[-1][0]['at'][11:16]
+        when=start+('–'+end if end!=start[11:] else '')
+        ids='、'.join(r['evidence_id'] for r,_ in items)
+        cut=any(r.get('truncated') for r,_ in items)
+        lines+=['---','','**'+when+' · '+(owner if g['role']=='user' else 'AI')+'**','']
+        lines+=['\n\n'.join(t for _,t in items),'',
+                '出处 evidence_id：'+ids+('；其中有原文过长，已截断' if cut else ''),'']
     return '\n'.join(lines)+'\n'
 
 

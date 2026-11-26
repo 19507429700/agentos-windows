@@ -11,6 +11,8 @@ python ops/team_chat_query.py 张三 --session 编号 [编号…] --out spaces/m
 """
 from __future__ import annotations
 import argparse
+import base64
+import binascii
 from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
@@ -27,6 +29,10 @@ CACHE = STATE/'team-members.json'
 CACHE_SECONDS = 600
 MAX_OUT = 1500        # 一次最多写多少条消息进文件
 MAX_REPLY = 1024*1024
+MAX_ATTACH_REPLY = 30*1024*1024   # 一个附件原件最大 20MB，转成文字传输会变大约三分之一
+MAX_ATTACH_COUNT = 300            # 一次最多取多少个截图和文件
+MAX_ATTACH_TOTAL = 200*1024*1024
+ATTACH_MARK = re.compile(r'\[(截图|文件 [^\]\n]+)\] 可看：(spaces/me/raw/ai/(?:images|files)/[^\s）)]+)')
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -101,10 +107,12 @@ def find(name):
 
 
 def fetch(url,body,timeout=12):
+    big=body.get('mode')=='attachment'
+    limit=MAX_ATTACH_REPLY if big else MAX_REPLY
     req=Request(url+'/v1/query',json.dumps(body).encode(),headers={'Content-Type':'application/json'},method='POST')
-    with opener().open(req,timeout=timeout) as response:
-        data=response.read(MAX_REPLY+1)
-        if len(data)>MAX_REPLY:raise ValueError('对方返回的内容太大')
+    with opener().open(req,timeout=90 if big else timeout) as response:
+        data=response.read(limit+1)
+        if len(data)>limit:raise ValueError('对方返回的内容太大')
         result=json.loads(data)
         if not isinstance(result,dict) or not isinstance(result.get('results'),list):raise ValueError('对方返回的格式不对')
         return result
@@ -160,10 +168,62 @@ def readable(text):
 def topic_of(text):
     """会话标题：本人第一句话，去掉排版符号和插图语法。"""
     t=re.sub(r'!\[[^\]]*\]\([^)]*\)','',clean_text(text))
+    t=re.sub(r'\[(截图|文件 [^\]\n]+)\](?: 可看：\S+|（[^）\n]*）)?','',t)  # 截图、文件不当标题
     return ' '.join(re.sub(r'[#*`|>]',' ',title_of(t)).split())
 
 
-def session_markdown(owner,page_list):
+def safe_name(text):
+    return re.sub(r'[\\/:*?"<>|()（）\[\]\s]+','_',text).strip('._') or '附件'
+
+
+class Attachments:
+    """整段对话里的截图和文件：向对方取原件。截图存进草稿、嵌进 Word；文件放进任务文件夹，随文档一起发到飞书。"""
+    def __init__(self,name,m,days,out):
+        self.name,self.m,self.days=name,m,days
+        self.img_dir=out.parent/(safe_name(out.stem)+'-图片')
+        cwd=Path.cwd().resolve()
+        parts=out.relative_to(cwd).parts if out.is_relative_to(cwd) else ()
+        if len(parts)>=6 and parts[:4]==('spaces','me','outbox','草稿'):  # 草稿/<任务号>/… → outbox/<任务号>/，里面的文件会发到飞书
+            self.send_dir=cwd/'spaces'/'me'/'outbox'/parts[4]
+        else:
+            self.send_dir=out.parent/(safe_name(out.stem)+'-附件')
+        self.cache={};self.total=0;self.images=0;self.files=0;self.failed=0
+
+    def get(self,rel):
+        if rel in self.cache:return self.cache[rel]
+        saved=None
+        if len(self.cache)<MAX_ATTACH_COUNT and self.total<MAX_ATTACH_TOTAL:
+            try:
+                r=ask(self.name,self.m,{'mode':'attachment','path':rel,'days':self.days})
+                data=base64.b64decode(r.get('data') or '')
+                fname=rel.rsplit('/',1)[-1]
+                if '/images/' in rel:
+                    target=self.img_dir/safe_name(fname);self.images+=1
+                else:
+                    target=self.send_dir/re.sub(r'^[0-9a-f]{12}-','',fname);self.files+=1
+                    n=2
+                    while target.exists() and target.read_bytes()!=data:
+                        target=target.with_name(target.stem.rsplit('（',1)[0]+'（'+str(n)+'）'+target.suffix);n+=1
+                target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
+                self.total+=len(data);saved=target
+            except (ValueError,OSError,binascii.Error):
+                saved=None
+        if saved is None:self.failed+=1
+        self.cache[rel]=saved
+        return saved
+
+    def render(self,text):
+        def one(m):
+            label,rel=m.group(1),m.group(2)
+            saved=self.get(rel)
+            if label=='截图':
+                if not saved:return '[截图]（没取到原图）'
+                return '\n\n![截图]('+saved.relative_to(Path.cwd().resolve()).as_posix()+')\n\n'
+            return '['+label+']'+('（原文件已随文档一起发送：'+saved.name+'）' if saved else '（没取到原件）')
+        return ATTACH_MARK.sub(one,text)
+
+
+def session_markdown(owner,page_list,attach=None):
     """一个会话写成一节：同一个人连续说的几条并成一段（AI 常把一次回答拆成好几条）。"""
     first=page_list[0];rows=[r for page in page_list for r in page['results']]
     topic=next((t for t in (topic_of(r['text']) for r in rows if r['role']=='user') if t),'')
@@ -175,6 +235,7 @@ def session_markdown(owner,page_list):
     groups=[]
     for r in rows:
         text=readable(r['text'])
+        text=attach.render(text) if attach else ATTACH_MARK.sub(lambda m:'['+m.group(1)+']',text)
         if not text.strip():continue
         if groups and groups[-1]['role']==r['role']:groups[-1]['items'].append((r,text))
         else:groups.append({'role':r['role'],'items':[(r,text)]})
@@ -191,6 +252,7 @@ def session_markdown(owner,page_list):
 
 def fetch_sessions(name,m,args):
     path=out_path(args.out);written=0;summary=[]
+    attach=Attachments(name,m,args.days,path)
     for sid in args.session:
         pages=[];offset=0
         while True:
@@ -204,10 +266,14 @@ def fetch_sessions(name,m,args):
                         **({} if got else {'note':'没有这个会话：编号不对、超出共享天数，或对方设为不共享'})})
         if got:
             path.parent.mkdir(parents=True,exist_ok=True)
-            with path.open('a',encoding='utf-8') as f:f.write('\n'+session_markdown(name,pages))
+            text=session_markdown(name,pages,attach)
+            with path.open('a',encoding='utf-8') as f:f.write('\n'+text)
         if written>=MAX_OUT:break
     return {'owner':name,'out':str(path),'sessions':summary,
-            'note':'已按时间顺序追加写进文件；下一步用 make_doc.py 转成 Word。'+
+            'attachments':{'images':attach.images,'files':attach.files,'failed':attach.failed,
+                           'files_dir':str(attach.send_dir) if attach.files else None},
+            'note':'已按时间顺序追加写进文件；截图已嵌进文件，原文件放在 files_dir（任务文件夹里的会随回复发到飞书）；'
+                   '下一步用 make_doc.py 转成 Word。'+
                    ('一次最多写 '+str(MAX_OUT)+' 条，后面的没写。' if written>=MAX_OUT else '')}
 
 

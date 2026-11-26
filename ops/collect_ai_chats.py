@@ -5,10 +5,14 @@ python ops/collect_ai_chats.py [--check] [--since YYYY-MM-DD]
 roots（平台到目录列表）、exclude_sessions（会话ID）、exclude_cwds（目录列表）。
 只读适配的本机会话JSONL与Grok Bot缓存，不读账号凭据，不采思考、工具及系统消息。
 输出 raw/ai/<消息实际日期>/<平台>-<会话摘要ID>.md；首次回填不会冒充今日活动。
+截图存进 raw/ai/images/<日期>/，用户发给 AI 的文档（PDF、Word、PPT、Excel、文本，20MB 以内）存进 raw/ai/files/<日期>/，
+原文里写成「[截图] 可看：spaces/me/raw/…」「[文件 名字] 可看：spaces/me/raw/…」；其他文件只记文件名。
 """
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -35,6 +39,12 @@ DEFAULT_ROOTS = {'workbuddy': [str(HOME/'.workbuddy/projects')],
                  'codex': [str(CODEX_HOME/'sessions'), str(CODEX_HOME/'archived_sessions')],
                  **default_snapshot_roots(HOME, STATE)}
 TEXT_TYPES = {'text', 'input_text', 'output_text'}
+IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+DOC_EXTS = {'.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.txt', '.md', '.csv'}
+MAX_ATTACH = 20 * 1024 * 1024
+MIME_EXTS = {'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/gif': '.gif',
+             'image/webp': '.webp', 'image/bmp': '.bmp'}
+ATTACH_VERSION = 'v1'   # 加上截图和文件那一版：旧记录要重读一遍才补得上
 CONTEXT_TAGS = ('environment_context', 'permissions_instructions', 'system-reminder',
                 'in-app-browser-context', 'send_user_message_question_reply',
                 'turn_aborted')
@@ -95,6 +105,127 @@ def visible_text(content):
     return ''
 
 
+def raw_rel(path):
+    """原文里写的路径：从项目文件夹根目录算起（spaces/me/raw/…），和微信图片一样。"""
+    return 'spaces/me/raw/' + path.relative_to(RAW).as_posix()
+
+
+def store_bytes(data, kind, day, name):
+    """存进 raw/ai/images|files/<日期>/，文件名带内容摘要，同一张图只存一份。"""
+    digest = hashlib.sha256(data).hexdigest()[:12]
+    stem, ext = os.path.splitext(name)
+    safe = re.sub(r'[\\/:*?"<>|\s]+', '_', stem).strip('._')[:60]
+    fname = digest + ext.lower() if kind == 'images' else digest + '-' + (safe or 'file') + ext.lower()
+    path = RAW / 'ai' / kind / day / fname
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + '.tmp')
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+    return raw_rel(path)
+
+
+def image_marker(data, day, ext):
+    if not data or len(data) > MAX_ATTACH:
+        return '[截图]（太大或是空的，没存）'
+    return '[截图] 可看：' + store_bytes(data, 'images', day, 'image' + ext)
+
+
+def local_file(text, cwd):
+    p = Path(os.path.expandvars(text.strip())).expanduser()
+    if not p.is_absolute() and cwd:
+        p = Path(cwd) / p
+    try:
+        return p if p.is_file() else None
+    except OSError:
+        return None
+
+
+def file_marker(ref, day, cwd):
+    """用户发给 AI 的文件：文档类 20MB 以内复制一份，其他只记文件名。"""
+    name = re.split(r'[\\/]', ref.rstrip('\\/'))[-1] or ref
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in DOC_EXTS | IMAGE_EXTS:
+        return f'[文件 {name}]（这种文件不复制，只记文件名）'
+    p = local_file(ref, cwd)
+    if not p:
+        return f'[文件 {name}]（电脑上已找不到，没存）'
+    if p.stat().st_size > MAX_ATTACH:
+        return f'[文件 {name}]（超过 20MB，没存）'
+    data = p.read_bytes()
+    if ext in IMAGE_EXTS:
+        return image_marker(data, day, ext)
+    return f'[文件 {name}] 可看：' + store_bytes(data, 'files', day, name)
+
+
+def workbuddy_blob(item):
+    """WorkBuddy 贴的图存在 ~/.workbuddy/blobs/<前两位>/<blob_id>.<扩展名>；记录里的路径可能是别的电脑上的。"""
+    if isinstance(item.get('image'), dict):
+        item = item['image']
+    path = item.get('blob_path')
+    if isinstance(path, str) and path and local_file(path, ''):
+        return Path(path)
+    blob = str(item.get('blob_id') or '')
+    if re.fullmatch(r'[0-9a-f]{16,}', blob):
+        hits = sorted((HOME/'.workbuddy'/'blobs'/blob[:2]).glob(blob + '.*'))
+        if hits:
+            return hits[0]
+    return None
+
+
+def content_text(content, day, cwd=''):
+    """可见文字 + 截图：按原顺序拼起来，截图换成「[截图] 可看：路径」。"""
+    if not isinstance(content, list):
+        return visible_text(content), 0
+    parts, images = [], 0
+    for x in content:
+        if not isinstance(x, dict):
+            continue
+        kind = x.get('type')
+        if kind in TEXT_TYPES and isinstance(x.get('text'), str):
+            parts.append(x['text'])
+            continue
+        marker = None
+        try:
+            if kind == 'image' and isinstance(x.get('source'), dict) and x['source'].get('type') == 'base64':
+                src = x['source']  # Claude Code：图片直接嵌在记录里
+                marker = image_marker(base64.b64decode(src.get('data') or '', validate=False), day,
+                                      MIME_EXTS.get(src.get('media_type'), '.png'))
+            elif kind == 'input_image' and str(x.get('image_url', '')).startswith('data:'):
+                head, _, data = x['image_url'].partition(',')  # Codex：data:image/png;base64,…
+                marker = image_marker(base64.b64decode(data, validate=False), day,
+                                      MIME_EXTS.get(head[5:].split(';')[0], '.png'))
+            elif kind in ('image_blob_ref', 'input_image'):
+                blob = workbuddy_blob(x)
+                if blob and blob.stat().st_size <= MAX_ATTACH:
+                    marker = image_marker(blob.read_bytes(), day, blob.suffix.lower() or '.png')
+                else:
+                    marker = '[截图]（电脑上已找不到，没存）'
+        except (OSError, ValueError, binascii.Error):
+            marker = '[截图]（读不了，没存）'
+        if marker:
+            parts.append(marker)
+            images += 1
+    return '\n'.join(parts), images
+
+
+def link_files(text, day, cwd, images):
+    """用户原话里提到的文件（@"D:/…/x.pdf"、WorkBuddy 的 <image_local_path>）换成存好的副本。"""
+    def local_image(m):
+        # 同一张图 WorkBuddy 已作为 blob 记过一次（images>0）时，这里的路径是重复的
+        return '' if images else file_marker(m.group(1), day, cwd)
+    text = re.sub(r'<image_local_path>(.*?)</image_local_path>', local_image, text, flags=re.S)
+    if images:
+        text = re.sub(r'@image#\d+:\S+', '', text)
+    text = re.sub(r'@"([^"\n]+)"', lambda m: file_marker(m.group(1), day, cwd), text)
+    def bare(m):
+        p = m.group(1).rstrip('.,，。;；:：)）')
+        if os.path.splitext(p)[1].lower() in DOC_EXTS | IMAGE_EXTS and local_file(p, cwd):
+            return file_marker(p, day, cwd) + m.group(1)[len(p):]
+        return m.group(0)
+    return re.sub(r'(?<![\w.])@([^\s"@]+)', bare, text)
+
+
 def clean_text(text):
     # Codex 中用户对澄清问题的回答也是用户文字，不应随上下文包装一起丢弃。
     def answer(match):
@@ -120,7 +251,7 @@ def clean_text(text):
     return text.strip().replace('\x00', '')
 
 
-def parse_event(src, event, fallback_session):
+def parse_event(src, event, fallback_session, since=''):
     if not isinstance(event, dict):
         return None
     kind = event.get('type')
@@ -153,14 +284,20 @@ def parse_event(src, event, fallback_session):
         return None
     if not isinstance(msg, dict) or msg.get('role') not in ('user', 'assistant'):
         return None
+    dt = timestamp(event.get('timestamp'))
+    if not dt:
+        return None
     text = visible_text(msg.get('content'))
     # 排除每日复盘及自动执行记录，避免采集→复盘→再采集的自反馈。
     if msg.get('role') == 'user' and (text.lstrip().startswith('按技能 daily-review 写')
             or '当天往来原文（聊天、邮件、收件箱' in text):
         return {'auto_review': True}
+    if msg['role'] == 'user' and dt.date().isoformat() >= since:  # 采集范围外的旧消息不复制附件
+        cwd = event.get('cwd') or ''
+        text, images = content_text(msg.get('content'), dt.date().isoformat(), cwd)
+        text = link_files(text, dt.date().isoformat(), cwd, images)
     text = clean_text(text)
-    dt = timestamp(event.get('timestamp'))
-    if not text or not dt:
+    if not text:
         return None
     # 无ID时以原始时间与正文去重；不能使用采集时间或文件名当事件时间。
     eid = str(eid) if eid is not None else hashlib.sha256((dt.isoformat()+msg['role']+text).encode()).hexdigest()
@@ -177,7 +314,14 @@ def open_db(path):
         role TEXT, text TEXT, PRIMARY KEY(src,session,id));
         CREATE INDEX IF NOT EXISTS messages_day ON messages(day);
         CREATE TABLE IF NOT EXISTS collection_windows(path TEXT PRIMARY KEY, since TEXT);
-        CREATE TABLE IF NOT EXISTS dirty(src TEXT, session TEXT, day TEXT, PRIMARY KEY(src,session,day));''')
+        CREATE TABLE IF NOT EXISTS dirty(src TEXT, session TEXT, day TEXT, PRIMARY KEY(src,session,day));
+        CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);''')
+    with db:
+        row = db.execute("SELECT value FROM meta WHERE key='attachments'").fetchone()
+        if not row or row[0] != ATTACH_VERSION:
+            # 以前采过的会话从头再读一遍，补上截图和文件；消息有编号，不会重复
+            db.execute("DELETE FROM files WHERE prefix != 'snapshot-v1'")
+            db.execute("INSERT OR REPLACE INTO meta VALUES('attachments',?)", (ATTACH_VERSION,))
     return db
 
 
@@ -268,7 +412,7 @@ def collect_file(db, src, path, since, cfg):
             cwd = event.get('cwd', cwd) if isinstance(event, dict) else cwd
             if any(os.path.normcase(cwd).startswith(os.path.normcase(x)) for x in cfg['exclude_cwds']):
                 continue
-            msg = parse_event(src, event, fallback)
+            msg = parse_event(src, event, fallback, since)
             if not msg:
                 continue
             if msg.get('auto_review'):

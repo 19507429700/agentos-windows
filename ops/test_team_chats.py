@@ -210,6 +210,60 @@ class TeamChatTest(unittest.TestCase):
             self.assertNotIn('<h1>冒充标题',html);self.assertIn('<table',html);self.assertNotIn('<img',html)
         finally:os.chdir(old)
 
+    def add_attachments(self):
+        """共享会话里一张截图、一个文件；不共享的会话里另一张截图。"""
+        raw=self.root/'raw';day=datetime.now(ai.TZ).date().isoformat()
+        (raw/'ai/images'/day).mkdir(parents=True);(raw/'ai/files'/day).mkdir(parents=True)
+        (raw/'ai/images'/day/'aaaaaaaaaaaa.png').write_bytes(b'PNGDATA')
+        (raw/'ai/images'/day/'bbbbbbbbbbbb.png').write_bytes(b'SECRET')
+        (raw/'ai/files'/day/'cccccccccccc-期中卷.pdf').write_bytes(b'%PDF')
+        img='spaces/me/raw/ai/images/'+day+'/aaaaaaaaaaaa.png';pdf='spaces/me/raw/ai/files/'+day+'/cccccccccccc-期中卷.pdf'
+        hid='spaces/me/raw/ai/images/'+day+'/bbbbbbbbbbbb.png'
+        now=datetime.now(ai.TZ)
+        with closing(ai.open_db(self.records)) as db, db:
+            db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',('workbuddy','s2','a1',now.isoformat(),day,'user',
+                       '看图 [截图] 可看：'+img+'\n[文件 期中卷.pdf] 可看：'+pdf))
+            db.execute('INSERT INTO messages VALUES(?,?,?,?,?,?,?)',('codex','secret','a2',now.isoformat(),day,'user','[截图] 可看：'+hid))
+        return raw,img,pdf,hid
+
+    def test_attachment_only_within_sharing(self):
+        import base64
+        raw,img,pdf,hid=self.add_attachments()
+        with patch.object(server.collect_ai_chats,'RAW',raw):
+            r=server.query_records(self.records,self.cfg,{'mode':'attachment','path':img})
+            self.assertEqual(base64.b64decode(r['data']),b'PNGDATA')
+            self.assertEqual(base64.b64decode(server.query_records(self.records,self.cfg,{'mode':'attachment','path':pdf})['data']),b'%PDF')
+            for bad in (hid,'spaces/me/raw/ai/images/2026-01-01/../../../x.png','spaces/me/raw/wechat/a.png',
+                        img.replace('aaaa','dddd')):
+                with self.assertRaises(ValueError):server.query_records(self.records,self.cfg,{'mode':'attachment','path':bad})
+            # 原件被删了：说不在了，不报错崩溃
+            (raw/img[len('spaces/me/raw/'):]).unlink()
+            with self.assertRaises(ValueError):server.query_records(self.records,self.cfg,{'mode':'attachment','path':img})
+
+    def test_full_session_embeds_images_and_sends_files(self):
+        import os,io,contextlib,time
+        raw,img,pdf,hid=self.add_attachments();old=os.getcwd();os.chdir(self.root)
+        try:
+            out=Path('spaces/me/outbox/草稿/9/测试成员-周报.md');out.parent.mkdir(parents=True)
+            with patch.object(client,'CACHE',self.root/'members.json'),patch.object(server.collect_ai_chats,'RAW',raw), \
+                 patch.object(client,'fetch',side_effect=lambda url,body:server.query_records(self.records,self.cfg,body)):
+                client.private_json(client.CACHE,{'at':time.time(),'members':{'测试成员':{'url':'u','online':True,'sharing':True}}})
+                buf=io.StringIO()
+                with contextlib.redirect_stdout(buf):client.main(['测试','--session',server.opaque('s2'),'--out',str(out)])
+                result=json.loads(buf.getvalue())
+            self.assertEqual(result['attachments']['images'],1);self.assertEqual(result['attachments']['files'],1)
+            text=out.read_text(encoding='utf-8')
+            self.assertIn('![截图](spaces/me/outbox/草稿/9/测试成员-周报-图片/aaaaaaaaaaaa.png)',text)
+            self.assertIn('[文件 期中卷.pdf]（原文件已随文档一起发送：期中卷.pdf）',text)
+            self.assertNotIn('spaces/me/raw/',text)
+            self.assertEqual(Path('spaces/me/outbox/9/期中卷.pdf').read_bytes(),b'%PDF')
+            self.assertEqual(Path('spaces/me/outbox/草稿/9/测试成员-周报-图片/aaaaaaaaaaaa.png').read_bytes(),b'PNGDATA')
+        finally:os.chdir(old)
+        # 对方还是旧版、取不到原件：只写占位，不报错
+        self.assertEqual(client.topic_of('[截图] 可看：'+img+'\n帮我看看这张图'),'帮我看看这张图')
+        self.assertEqual(client.topic_of('[截图]（电脑上已找不到，没存）'),'')
+        self.assertEqual(client.ATTACH_MARK.sub(lambda m:'['+m.group(1)+']','x [截图] 可看：'+img),'x [截图]')
+
     def test_bot_rules_allow_only_the_query_command(self):
         repo=Path(__file__).resolve().parent.parent
         win=(repo/'ops/windows/install.ps1').is_file()  # 同一份测试，Windows 版和 Mac 版仓库都用

@@ -31,7 +31,8 @@ import threading
 import time
 import hashlib
 
-from collect_ai_chats import STATE, TZ, DEFAULT_ROOTS, clean_text
+import collect_ai_chats
+from collect_ai_chats import STATE, TZ, DEFAULT_ROOTS, MAX_ATTACH, clean_text
 
 PLATFORMS = tuple(DEFAULT_ROOTS)
 CONFIG = STATE/'team-sharing.json'
@@ -80,10 +81,11 @@ def connect_records(path):
 
 def query_records(path, cfg, body):
     if not isinstance(body,dict):raise ValueError('请求必须是对象')
-    if set(body)-{'mode','terms','days','limit','platform','session','offset'}:raise ValueError('不支持的查询参数')
+    if set(body)-{'mode','terms','days','limit','platform','session','offset','path'}:raise ValueError('不支持的查询参数')
     mode=body.get('mode','search');terms=body.get('terms',[])
     if mode=='session':return session_records(path,cfg,body)
-    if 'session' in body or 'offset' in body:raise ValueError('session/offset 只用于 mode=session')
+    if mode=='attachment':return attachment(path,cfg,body)
+    if {'session','offset','path'}&set(body):raise ValueError('session、offset、path 只用于整段会话和附件')
     if mode not in ('search','recent'):raise ValueError('mode 只能是 search、recent 或 session')
     if not isinstance(terms,list) or len(terms)>8 or any(not isinstance(t,str) or not t.strip() or len(t)>100 for t in terms):
         raise ValueError('terms 必须是最多8个非空关键词')
@@ -153,12 +155,40 @@ def session_records(path, cfg, body):
     return out
 
 
+ATTACH_PATH = re.compile(r'spaces/me/raw/ai/(images|files)/\d{4}-\d{2}-\d{2}/[^/\\]{1,200}')
+
+
+def attachment(path, cfg, body, raw=None):
+    """截图或文件的原件：只给共享范围内（天数内、没 hide 的会话）某条消息里提到过的。"""
+    if set(body)-{'mode','path','days'}:raise ValueError('不支持的查询参数')
+    rel=body.get('path')
+    if not isinstance(rel,str) or not ATTACH_PATH.fullmatch(rel) or '..' in rel:raise ValueError('path 不对')
+    days=body.get('days',15)
+    if type(days) is not int or not 1<=days<=90:raise ValueError('days 范围1–90')
+    days=min(days,int(cfg.get('days',DEFAULT_DAYS)))
+    since=(datetime.now(TZ).date()-timedelta(days=days-1)).isoformat()
+    hidden=set(cfg.get('hidden',[]))
+    like='%'+rel.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+    with closing(connect_records(path)) as db:
+        sessions=[sid for (sid,) in db.execute("SELECT DISTINCT session FROM messages WHERE day>=? AND text LIKE ? ESCAPE '\\'",
+                                                 (since,like))]
+    if not any(opaque(sid) not in hidden for sid in sessions):raise ValueError('不在共享范围内')
+    base=(raw or collect_ai_chats.RAW).resolve()
+    file=(base/rel[len('spaces/me/raw/'):]).resolve()
+    if not file.is_relative_to(base/'ai') or not file.is_file() or file.stat().st_size>MAX_ATTACH:
+        raise ValueError('原件不在了')
+    data=file.read_bytes()
+    return {'owner':cfg.get('name',''),'path':rel,'name':file.name,'size':len(data),
+            'data':base64.b64encode(data).decode(),'results':[]}
+
+
 def log_access(who,body,count):
     try:
         ACCESS_LOG.parent.mkdir(parents=True,exist_ok=True)
         mode=body.get('mode')
         what=('最近' if mode=='recent' else '取整段会话 '+str(body.get('session'))+'（第 '+str(body.get('offset',0)+1)+' 条起）'
-              if mode=='session' else '搜「'+' '.join(body.get('terms',[]))[:40]+'」')
+              if mode=='session' else '取附件 '+str(body.get('path','')).rsplit('/',1)[-1][:60] if mode=='attachment'
+              else '搜「'+' '.join(body.get('terms',[]))[:40]+'」')
         with ACCESS_LOG.open('a',encoding='utf-8') as f:
             f.write(datetime.now(TZ).strftime('%Y-%m-%d %H:%M')+'  '+who+'  '+what+'  返回 '+str(count)+' 条\n')
     except OSError:
@@ -208,12 +238,12 @@ class ChatHandler(BaseHTTPRequestHandler):
                 old,count=self.server.rates.get(who,(bucket,0))
                 count=count+1 if old==bucket else 1
                 self.server.rates[who]=(bucket,count)
-            if count>60:return self.reply(429,{'error':'rate_limited'})
+            if count>120:return self.reply(429,{'error':'rate_limited'})  # 整段对话连带截图时一分钟会请求几十次
             size=int(self.headers.get('Content-Length','0'))
             if not 0<size<=16384:raise ValueError('invalid request size')
             body=json.loads(self.rfile.read(size))
             result=query_records(self.server.records,cfg,body)
-            log_access(who,body,len(result['results']))
+            log_access(who,body,len(result['results']) or (1 if 'data' in result else 0))
             self.reply(200,result)
         except (ValueError,TypeError):self.reply(400,{'error':'invalid_request'})
         except (OSError,sqlite3.Error,KeyError):self.reply(503,{'error':'local_records_unavailable'})

@@ -119,19 +119,21 @@ def main(argv=None):
     name,m=find(args.member)
     body={'mode':'recent' if args.recent else 'search','terms':args.terms,'days':args.days,'limit':args.limit}
     if args.platform:body['platform']=args.platform
+    # 先用缓存；缓存说他离线、关了共享或连不上时，都重新问一遍再下结论（他可能刚开机、刚重新打开共享）
     for retry in (False,True):
-        if retry:m=members(refresh=True).get(name) or {}  # 缓存可能过时：重新问一遍对方现在的状态
-        if not m.get('online'):raise ValueError('「'+name+'」的电脑现在不在线（关机、睡眠或断网），查不到；这不等于没有记录')
-        if not m.get('sharing'):raise ValueError('「'+name+'」关掉了共享（或查询服务没在运行），查不到；这不等于没有记录')
-        try:result=fetch(m['url'],body);break
-        except HTTPError as exc:
-            if exc.code==403 and not retry:continue
-            raise ValueError({401:'请求没有经过团队网络，对方拒绝了',403:'「'+name+'」关掉了共享',
-                              429:'查得太频繁，过一分钟再试',503:'「'+name+'」的电脑在线，但聊天库暂时读不了'
-                              }.get(exc.code,'对方返回错误：'+str(exc.code))) from None
-        except (URLError,TimeoutError,OSError):
-            if not retry:continue
-            raise ValueError('连不上「'+name+'」：可能刚关机或断网；这不等于没有记录') from None
+        if retry:m=members(refresh=True).get(name) or {}
+        if not m.get('online'):problem='「'+name+'」的电脑现在不在线（关机、睡眠或断网），查不到；这不等于没有记录'
+        elif not m.get('sharing'):problem='「'+name+'」关掉了共享（或查询服务没在运行），查不到；这不等于没有记录'
+        else:
+            try:result=fetch(m['url'],body);break
+            except HTTPError as exc:
+                problem={401:'请求没有经过团队网络，对方拒绝了',403:'「'+name+'」关掉了共享，查不到；这不等于没有记录',
+                         429:'查得太频繁，过一分钟再试',503:'「'+name+'」的电脑在线，但聊天库暂时读不了'
+                         }.get(exc.code,'对方返回错误：'+str(exc.code))
+                if exc.code!=403:raise ValueError(problem) from None
+            except (URLError,TimeoutError,OSError):
+                problem='连不上「'+name+'」：可能刚关机或断网；这不等于没有记录'
+        if retry:raise ValueError(problem)
     print(json.dumps(result,ensure_ascii=False));return 0
 
 

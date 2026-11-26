@@ -135,6 +135,11 @@ class TeamChatTest(unittest.TestCase):
             client.private_json(client.CACHE,{'at':time.time(),'members':{'小关':{'url':off,'online':True,'sharing':True}}})
             with self.assertRaisesRegex(ValueError,'关掉了共享'):client.main(['小关','--recent'])
             self.assertEqual(fetch.call_count,1)
+            # 反过来：缓存还写着「关了共享」，但他刚重新 on 了：要重新问一遍，照常查到
+            client.private_json(client.CACHE,{'at':time.time(),'members':{'小关':{'url':off,'online':True,'sharing':False}}})
+            fetch.side_effect=None;fetch.return_value={'owner':'小关','results':[]}
+            with patch.object(client,'probe',return_value={'service':'agentos-team-chat','name':'小关','sharing':True,'days':15}):
+                self.assertEqual(client.main(['小关','--recent']),0)
 
     def test_bot_rules_allow_only_the_query_command(self):
         repo=Path(__file__).resolve().parent.parent

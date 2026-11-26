@@ -117,6 +117,7 @@ py ops\team_chat_query.py 张三 --recent --days 3
 | `--members` 里没有某人 | 他还没运行第三步的 `on`，或者电脑没开、没连 Tailscale |
 | 「某某的电脑现在不在线」 | 对方关机、睡眠，或者没勾 Run unattended |
 | 「某某关掉了共享」 | 对方运行了 `off` |
+| 自己 `off` 了，在飞书里查自己还能查到 | 正常：机器人查你本人时会直接读你本机的记录，`off` 只挡别人。想自己验证 `off`，用终端 `py ops\team_chat_query.py 自己的名字 --recent`，应提示「关掉了共享」 |
 | 「聊天库暂时读不了」 | 对方还没采集过，让他运行 `py ops\collect_ai_chats.py` |
 | `status` 显示本机服务没在运行 | 等一分钟再看；还不行，看 `.agentos\logs\team-chat.log`，或重新运行 `on` |
 | 终端能查，飞书说没权限 | 先在飞书发「新对话」；还不行，确认拉到了最新代码 |
